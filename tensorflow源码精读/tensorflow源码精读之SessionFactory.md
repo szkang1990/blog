@@ -68,4 +68,19 @@ SessionFactories* session_factories() {
   return factories;
 }
 ```
-SessionFactories是一个记录SessionFactory的map。key是DIRECT_SESSION或者是GRPC_SESSION
+
+SessionFactories是一个记录SessionFactory的map。key是DIRECT_SESSION或者是GRPC_SESSION。应该注意的是，session_factories函数的返回结果是一个static类型的变量，这个变量只会初始化一次，这在[c++中static变量的初始化](https://github.com/szkang1990/blog/blob/main/c%2B%2B%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/c%2B%2B%E4%B8%ADstatic%E5%8F%98%E9%87%8F%E5%88%9D%E5%A7%8B%E5%8C%96.md)中有介绍
+
+
+SessionFactories的写入函数也被定义在SessionFactory中，两个子类DirectionSessionFactory和GrpcSessionFactory都是通过调用这个函数写入SessionFactories
+```cpp
+void SessionFactory::Register(const string& runtime_type,
+                              SessionFactory* factory) {
+  mutex_lock l(*get_session_factory_lock());
+  if (!session_factories()->insert({runtime_type, factory}).second) {
+    LOG(ERROR) << "Two session factories are being registered "
+               << "under" << runtime_type;
+  }
+}
+```
+
