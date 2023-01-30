@@ -44,9 +44,11 @@ static ::tensorflow::InitOnStartupMarker const register_op0 __attribute__((unuse
 > ::tensorflow::InitOnStartupMarker {} << ::tensorflow::register_op::OpDefBuilderWrapper("test")
 >```
 这里需要分别分析InitOnStartupMarker 和 OpDefBuilderWrapper 源码
+## OpDefBuilderWrapper
 
-先来看OpDefBuilderWrapper。OpDefBuilderWrapper的代码如下
+&emsp;先来看OpDefBuilderWrapper。OpDefBuilderWrapper的代码如下
 
+```cpp
 namespace register_op {
  
 class OpDefBuilderWrapper {
@@ -122,34 +124,43 @@ class OpDefBuilderWrapper {
 };
  
 }
+```
 
 在构造函数中，入参是字符串name，构造函数创建一个OpDefBuilder类builder_， 然后后面所有的类函数都是直接传给builder_， 然后类函数返回OpDefBuilderWrapper 本身，以方面用上面的链式定义。
 
 主要用到的类函数包括
 
 Attr：attr输入为一个字符串，attr的用法是
-
+```cpp
 REGISTER_OP("opName")
     .Attr("reduction: {'min', 'max', 'prod', 'sum'}")
     .Attr("T: {half, float, float64, int32, int64}")
     .Attr("num_devices: int")
     .Attr("shared_name: string")
     .Attr("XlaCompile: bool=true")
+```
  "Attr"是一个允许自定义的值, 比如XLA引擎就根据自身需求提供了"XlaCompile", 如果一个Op将该值设置为true, 就会强制XLA引擎将其编译. 当然, 也可以设置一些无用的值, 就像函数声明里有一个并没有实际使用的参数, 除了浪费存储空间没有其他用途.
 
 Input: 输入为一个字符串，input用于设置算子的输入
+
+```cpp
 REGISTER_OP("ZeroOutKsz")
     .Input("input1: int32")
-    .Input("input2: int32)
-);
+    .Input("input2: int32")
+```
+
 Output: 输入为一个字符串，用于设置算子的输出
+
+```cpp
 REGISTER_OP("ZeroOutKsz")
     .Output("zeroed: int32")
-);
+```
+
  SetShapeFn:  输入是一个接口或者函数，用于设置输出的形状，例如下面的例子就是输入了一个lambda 函数为了在创建图的时候就能够实现tensor形状的自洽。改接口经常以shape_inference::InferenceContext 为输入， InferenceContext后面会单独讲
 
 从上面的分析可以看到REGISTER_OP 的主要过程就是通过几层宏，生成了一个OpDefBuilderWrapper，而OpDefBuilderWrapper的构造函数和几个主要函数都是为了生成与修改OpDefBuilder。OpDefBuilder 的定义如下：
 
+```cpp
 class OpDefBuilder {
  public:
   // Constructs an OpDef with just the name field set.
@@ -281,21 +292,24 @@ class OpDefBuilder {
 };
  
 }  // namespace tensorflow
+```
 
 OpDefBuilder几个主要的类成员都是我们最一开始的时候设置op的时候设置的那些属性
 
+```cpp
   std::vector<string> attrs_;
   std::vector<string> inputs_;
   std::vector<string> outputs_;
   std::vector<string> control_outputs_;
+```
 
 下面这些类函数也都是用于设置这些属性。
 
+```cpp
 Attr(std::string spec);
-
 OpDefBuilder& Input(std::string spec);
-
 OpDefBuilder& Output(std::string spec);
+```
 
  其中值得注意的类成员和类函数是
 
