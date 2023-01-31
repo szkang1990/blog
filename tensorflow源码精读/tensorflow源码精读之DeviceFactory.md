@@ -1,0 +1,13 @@
+&emsp;这一节我们一起学习一下tensorflow的device。经过前面的介绍，我们能看出来tensorflow使用了很多factory设计模式，Device同样沿用这种设计，tensorflow设计了各种device的factory，以生成这种device对象。
+
+tensorflow中有很多的DeviceFactory
+PluggableDeviceFactory
+DeviceFactory
+NextPluggableDeviceFactory
+BaseGPUDeviceFactory
+GPUCompatibleCPUDevice
+GPUDeviceFactory
+ThreadPoolDeviceFactory
+TpuSystemDeviceFactory
+TpuNodeDeviceFactory
+XlaGpuDeviceFactory
