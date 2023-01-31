@@ -167,7 +167,7 @@ DeviceFactory* DeviceFactory::GetFactory(const string& device_type) {
 }
 ```
 
-NewDevice函数，用于从deviceFActory生成一个eDevices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个
+NewDevice函数，用于从deviceFActory生成一个eDevices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个子类中。
 
 ```cpp
 std::unique_ptr<Device> DeviceFactory::NewDevice(const string& type,
