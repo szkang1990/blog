@@ -53,7 +53,8 @@ class DeviceContext : public core::RefCounted {
 ```
 
 可以看到DeviceContext的主要作用就是提供两个接口，用于tensor在cpu和其他设备之间的相互拷贝
+
 device_thread_pool_ 也是一个线程池
 
-eigen_cpu_devices_
+eigen_cpu_devices_ Eigen库定义的ThreadPoolDevice类。
 
