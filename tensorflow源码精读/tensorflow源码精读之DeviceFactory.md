@@ -328,3 +328,7 @@ options.config.device_count()
       ProcessState::singleton()->GetCPUAllocator(port::kNUMANoAffinity));
 ```
 
+上面的代码就是ThreadPoolDevice的构造函数，我们来一起学习一下ThreadPoolDevice
+
+### ThreadPoolDevice
+
