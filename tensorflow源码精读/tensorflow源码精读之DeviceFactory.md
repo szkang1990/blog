@@ -129,7 +129,7 @@ void DeviceFactory::Register(const string& device_type,
   }
 }
 ```
-deviceFactory的注册信息被放在一个静态变量map中，这一点和sesssionFactory的注册是一样的。这个存储注册信息的变量定义如下：
+在注册时，如果同一个device_type被注册两次，那么由FactoryItem的属性priority，来决定注册哪个deviceFactory。deviceFactory的注册信息被放在一个静态变量map中，这一点和sesssionFactory的注册是一样的。这个存储注册信息的变量定义如下：
 
 ```cpp
 std::unordered_map<string, FactoryItem>& device_factories() {
@@ -167,7 +167,7 @@ DeviceFactory* DeviceFactory::GetFactory(const string& device_type) {
 }
 ```
 
-NewDevice函数，用于从deviceFActory生成一个eDevices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个子类中。
+&emsp;NewDevice函数，用于从deviceFActory生成一个eDevices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个子类中。
 
 ```cpp
 std::unique_ptr<Device> DeviceFactory::NewDevice(const string& type,
@@ -188,5 +188,26 @@ std::unique_ptr<Device> DeviceFactory::NewDevice(const string& type,
   }
   DCHECK_EQ(devices.size(), static_cast<size_t>(expected_num_devices));
   return std::move(devices[0]);
+}
+```
+
+AddCpuDevices是从注册的deviceFactory中获取一个cpu的device，然后创建一个CreateDevices
+
+```cpp
+Status DeviceFactory::AddCpuDevices(
+    const SessionOptions& options, const string& name_prefix,
+    std::vector<std::unique_ptr<Device>>* devices) {
+  auto cpu_factory = GetFactory("CPU");
+  if (!cpu_factory) {
+    return errors::NotFound(
+        "CPU Factory not registered. Did you link in threadpool_device?");
+  }
+  size_t init_size = devices->size();
+  TF_RETURN_IF_ERROR(cpu_factory->CreateDevices(options, name_prefix, devices));
+  if (devices->size() == init_size) {
+    return errors::NotFound("No CPU devices are available in this process");
+  }
+
+  return OkStatus();
 }
 ```
