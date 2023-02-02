@@ -58,3 +58,7 @@ device_thread_pool_ 也是一个线程池
 
 eigen_cpu_devices_ Eigen库定义的ThreadPoolDevice类。
 
+用一张图来表示device的属性
+![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/SeaTalk_IMG_1675333664.png?raw=true)
+
+
