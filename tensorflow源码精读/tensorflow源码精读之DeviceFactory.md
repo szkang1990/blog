@@ -12,8 +12,8 @@ BaseGPUDeviceFactory && GPUDeviceFactory： 用于生成BaseGPUDevice和GPUDevic
 
 其他factory比较少用到，而且从上面的三个就能大概明白factory的工作原理了。
 
-
-首先看一下父类DeviceFactory的定义，DeviceFactory的定义放在tensorflow\core\framework\device_factory.h和tensorflow\core\framework\device_factory.cc中。DeviceFactory对象的定义是：
+### DeviceFactory
+&emsp;首先看一下父类DeviceFactory的定义，DeviceFactory的定义放在tensorflow\core\framework\device_factory.h和tensorflow\core\framework\device_factory.cc中。DeviceFactory对象的定义是：
 ```cpp
 class DeviceFactory {
  public:
@@ -100,7 +100,12 @@ class DeviceFactory {
 };
 ```
 
-在tensorflow\core\framework\device_factory.cc 中有一些基本的函数的实现，我们来看一下：
+在tensorflow\core\framework\device_factory.cc 中有一些基本的函数的实现，如下图所示
+
+![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/devicefactory2.png?raw=true)
+
+下面介绍一些常用的函数：
+#### Register
 Register函数用于deviceFactory的注册。
 
 ```cpp
@@ -129,7 +134,9 @@ void DeviceFactory::Register(const string& device_type,
   }
 }
 ```
-在注册时，如果同一个device_type被注册两次，那么由FactoryItem的属性priority，来决定注册哪个deviceFactory。deviceFactory的注册信息被放在一个静态变量map中，这一点和sesssionFactory的注册是一样的。这个存储注册信息的变量定义如下：
+在注册时，如果同一个device_type被注册两次，那么由FactoryItem的属性priority，来决定注册哪个deviceFactory。
+#### device_factories
+deviceFactory的注册信息被放在一个静态变量map中，这一点和sesssionFactory的注册是一样的。这个存储注册信息的变量定义如下：
 
 ```cpp
 std::unordered_map<string, FactoryItem>& device_factories() {
@@ -149,6 +156,7 @@ struct FactoryItem {
 };
 ```
 
+#### getFactory
 getFactory函数,即根据key从注册map中获取DeviceFactory
 
 ```cpp
@@ -167,6 +175,7 @@ DeviceFactory* DeviceFactory::GetFactory(const string& device_type) {
 }
 ```
 
+#### NewDevice
 &emsp;NewDevice函数，用于从deviceFActory生成一个eDevices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个子类中。
 
 ```cpp
@@ -190,8 +199,8 @@ std::unique_ptr<Device> DeviceFactory::NewDevice(const string& type,
   return std::move(devices[0]);
 }
 ```
-
-AddCpuDevices是从注册的deviceFactory中获取一个cpu的device，然后创建一个CreateDevices
+#### AddCpuDevices
+AddCpuDevices是从注册的deviceFactory中获取cpu的device(在deviceFacotries中，每种deviceFactory只能注册一个，因为都是以设备名称为key，重复注册会相互覆盖），然后创建一个CreateDevices。
 
 ```cpp
 Status DeviceFactory::AddCpuDevices(
@@ -211,3 +220,111 @@ Status DeviceFactory::AddCpuDevices(
   return OkStatus();
 }
 ```
+
+#### ListAllPhysicalDevices
+&emsp;光从名字就能看出来这个函数用于列出所有的物理设备。其实是列举出被注册在deviceFactories的设备。这里说的物理设备其实还是对设备的抽象。这个函数由两部分组成，第一部分是列出CPU，CPU是必须要有的，如果没有找到CPU的deviceFacotries则会报错。找到CPU的factory后，通过factory的ListPhysicalDevices列出CPU，如果没有找到CPU设备，同样要报错。然后就是列出CPU以外的所有设备。
+
+```cpp
+Status DeviceFactory::ListAllPhysicalDevices(std::vector<string>* devices) {
+  // CPU first. A CPU device is required.
+  // TODO(b/183974121): Consider merge the logic into the loop below.
+  auto cpu_factory = GetFactory("CPU");
+  if (!cpu_factory) {
+    return errors::NotFound(
+        "CPU Factory not registered. Did you link in threadpool_device?");
+  }
+
+  size_t init_size = devices->size();
+  TF_RETURN_IF_ERROR(cpu_factory->ListPhysicalDevices(devices));
+  if (devices->size() == init_size) {
+    return errors::NotFound("No CPU devices are available in this process");
+  }
+
+  // Then the rest (including GPU).
+  tf_shared_lock l(*get_device_factory_lock());
+  for (auto& p : device_factories()) {
+    auto factory = p.second.factory.get();
+    if (factory != cpu_factory) {
+      TF_RETURN_IF_ERROR(factory->ListPhysicalDevices(devices));
+    }
+  }
+
+  return Status::OK();
+}
+```
+
+上面用到了ListPhysicalDevices，ListPhysicalDevices被实现在各种deviceFactory子类中。后面会有详细介绍。
+## ThreadPoolDeviceFactory
+
+ThreadPoolDeviceFactory 是 DeviceFactory的直接子类。定义在tensorflow/core/common_runtime/threadpool_device_factory.cc，由于太过简单，没有定义头文件。
+
+ThreadPoolDeviceFactory的函数只有两个，ListPhysicalDevices和CreateDevices
+
+### ListPhysicalDevices
+在lDeviceFactory的ListAllPhysicalDevices被调用。该函数源码也非常简单：
+```cpp
+  Status ListPhysicalDevices(std::vector<string>* devices) override {
+    devices->push_back("/physical_device:CPU:0");
+
+    return Status::OK();
+  }
+```
+
+这个代码非常有意思，他会直接返回0号cpu，也就是说，无论一个设备中有多少cpu，最终参与计算的就一个。
+
+### CreateDevices
+CreateDevices 是 实现了父类DeviceFactory 中的虚函数，这个函数在父类的AddDevices， NewDevice， AddCpuDevices被调用。
+```cpp
+Status CreateDevices(const SessionOptions& options, const string& name_prefix,
+                       std::vector<std::unique_ptr<Device>>* devices) override {
+    int num_numa_nodes = port::NUMANumNodes();
+    int n = 1;
+    auto iter = options.config.device_count().find("CPU");
+    if (iter != options.config.device_count().end()) {
+      n = iter->second;
+    }
+    for (int i = 0; i < n; i++) {
+      string name = strings::StrCat(name_prefix, "/device:CPU:", i);
+      std::unique_ptr<ThreadPoolDevice> tpd;
+      if (options.config.experimental().use_numa_affinity()) {
+        int numa_node = i % num_numa_nodes;
+        if (numa_node != i) {
+          LOG(INFO) << "Only " << num_numa_nodes
+                    << " NUMA nodes visible in system, "
+                    << " assigning device " << name << " to NUMA node "
+                    << numa_node;
+        }
+        DeviceLocality dev_locality;
+        dev_locality.set_numa_node(numa_node);
+        tpd = absl::make_unique<ThreadPoolDevice>(
+            options, name, Bytes(256 << 20), dev_locality,
+            ProcessState::singleton()->GetCPUAllocator(numa_node));
+      } else {
+        tpd = absl::make_unique<ThreadPoolDevice>(
+            options, name, Bytes(256 << 20), DeviceLocality(),
+            ProcessState::singleton()->GetCPUAllocator(port::kNUMANoAffinity));
+      }
+      devices->push_back(std::move(tpd));
+    }
+
+    return Status::OK();
+  }
+  ```
+CreateDevices用于生成一个ThreadPoolDevice,入参是SessionOptions格式的option，一个空的Device指针std::vector<std::unique_ptr<Device>>* devices。以及一个前缀，这个前缀一般会冠诸如”/job:localhost/replica:0/task:0“ 等信息。
+
+其中SessionOptions 是一个结构体，其中一个属性是config，数据类型是ConfigProto， 由proto文件tensorflow/core/protobuf/config.proto定义。config也是在上面的代码中用到的属性，上面代码中的用法是
+
+```cpp
+options.config.device_count()
+```
+
+这段代码用于获取device_count， device_count 在 是ConfigProto的属性，是一个map<string, int32> 类型的map。这个map用于记录每种设备的最大使用数量。如果某种设备没有被记录在这个map中，则会大概估计一个数量。这个属性非常重要，用于确定device的数量。
+
+接下来的代码关于numa的部分可以不管，numa是一种内存分配方案，有兴趣可以单独去学习。核心的代码的就是
+
+```cpp
+  tpd = absl::make_unique<ThreadPoolDevice>(
+      options, name, Bytes(256 << 20), DeviceLocality(),
+      ProcessState::singleton()->GetCPUAllocator(port::kNUMANoAffinity));
+```
+
