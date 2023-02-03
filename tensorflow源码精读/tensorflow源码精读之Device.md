@@ -7,16 +7,16 @@ device相关的对象继承关系非常杂，下图所示：
 ```mermaid
 
 classDiagram
-  DeviceBase <|--Device
-  Device <|--LocalDevice
-  Device <|--SingleThreadedCPUDevice
-  Device <|--RemoteDevice
-  LocalDevice <|--ThreadPoolDevice
-  LocalDevice <|--BaseGPUDevice
-  LocalDevice <|--PluggableDevice
-  LocalDevice <|--TpuDeviceState
-  BaseGPUDevice <|--GPUDevice
-  ThreadPoolDevice <|--GPUCompatibleCPUDevice
+  DeviceBase <--Device
+  Device <--LocalDevice
+  Device <--SingleThreadedCPUDevice
+  Device <--RemoteDevice
+  LocalDevice <--ThreadPoolDevice
+  LocalDevice <--BaseGPUDevice
+  LocalDevice <--PluggableDevice
+  LocalDevice <--TpuDeviceState
+  BaseGPUDevice <--GPUDevice
+  ThreadPoolDevice <--GPUCompatibleCPUDevice
 ```
 
 其中localDevice的各种子类由各种factory生成。syclDevice在最新版本的tensorflow中已经换成了plugindevice等设备。不过这些设备都不常用，所以我们把注意力放在localDevice中就好。
@@ -364,7 +364,7 @@ LocalDevice::LocalDevice(const SessionOptions& options,
 
 ```mermaid
 classDiagram
-  DeviceBase <|--Device: Inheritance
+  DeviceBase <--Device: Inheritance
   DeviceBase : + CpuWorkerThreads* cpu_worker_threads_ = nullptr
   DeviceBase : + AcceleratorDeviceInfo* accelerator_device_info_ = nullptr
   DeviceBase : + thread&#58&#58ThreadPool* device_thread_pool_ = nullptr
@@ -377,15 +377,15 @@ classDiagram
   AcceleratorDeviceInfo:+  DeviceContext* default_context = nullptr
   AcceleratorDeviceInfo:+  EventMgr* event_mgr = nullptr
   AcceleratorDeviceInfo:+  int gpu_id = -1
-  Device <|--LocalDevice : Inheritance
-  Device <|--SingleThreadedCPUDevice : Inheritance
-  Device <|--RemoteDevice : Inheritance
-  LocalDevice <|--ThreadPoolDevice : Inheritance
-  LocalDevice <|--BaseGPUDevice : Inheritance
-  LocalDevice <|--PluggableDevice : Inheritance
-  LocalDevice <|--TpuDeviceState : Inheritance
-  BaseGPUDevice <|--GPUDevice : Inheritance
-  ThreadPoolDevice <|--GPUCompatibleCPUDevice : Inheritance
+  Device <--LocalDevice : Inheritance
+  Device <--SingleThreadedCPUDevice : Inheritance
+  Device <--RemoteDevice : Inheritance
+  LocalDevice <--ThreadPoolDevice : Inheritance
+  LocalDevice <--BaseGPUDevice : Inheritance
+  LocalDevice <--PluggableDevice : Inheritance
+  LocalDevice <--TpuDeviceState : Inheritance
+  BaseGPUDevice <--GPUDevice : Inheritance
+  ThreadPoolDevice <--GPUCompatibleCPUDevice : Inheritance
 
 
 ```
