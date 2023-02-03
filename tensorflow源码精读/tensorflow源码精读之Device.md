@@ -377,6 +377,31 @@ classDiagram
   AcceleratorDeviceInfo:+  DeviceContext* default_context = nullptr
   AcceleratorDeviceInfo:+  EventMgr* event_mgr = nullptr
   AcceleratorDeviceInfo:+  int gpu_id = -1
+  AcceleratorDeviceInfo o-- DeviceContext: composition
+  DeviceContext:+ void CopyCPUTensorToDevice(const* Tensor, Device* device,Tensor* device_tensor, StatusCallback done, bool sync_dst_compute = true)
+  DeviceContext:+ void CopyDeviceTensorToCPU(const Tensor* device_tensor, StringPiece tensor_name, Device* device, Tensor* cpu_tensor, StatusCallback done)
+  DeviceContext:+ 用于tensor在各种设备之间的拷贝
+  Device : + DeviceAttributes device_attributes_
+  Device : + DeviceNameUtils&#58&#58ParsedName parsed_name_
+  Device : + OpSegment op_seg_
+  Device : + ResourceMgr* rmgr_ = nullptr
+
+  Device o-- DeviceAttributes
+  DeviceAttributes : string name = 1
+  DeviceAttributes : string device_type = 2
+  DeviceAttributes : int64 memory_limit = 4
+  DeviceAttributes : DeviceLocality locality = 5
+  DeviceAttributes : fixed64 incarnation = 6
+  DeviceAttributes : string physical_device_desc = 7
+  DeviceAttributes : int64 xla_global_id = 8
+
+  ParsedName --o Device :composition
+  ParsedName : 从deviceName中解析出的信息，由ParseFullName函数得到
+
+  OpSegment --o Device: composition
+  OpSegment: 记录session和opkernel的信息
+
+
   Device <--LocalDevice : Inheritance
   Device <--SingleThreadedCPUDevice : Inheritance
   Device <--RemoteDevice : Inheritance
@@ -387,8 +412,12 @@ classDiagram
   BaseGPUDevice <--GPUDevice : Inheritance
   ThreadPoolDevice <--GPUCompatibleCPUDevice : Inheritance
 
+  LocalDevice : use_global_threadpool_
+  LocalDevice : std&#58&#58unique_ptr<EigenThreadPoolInfo> owned_tp_info_
 
+  
 ```
+
 
 
 
