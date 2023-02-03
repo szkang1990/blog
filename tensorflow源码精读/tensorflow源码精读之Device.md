@@ -3,7 +3,21 @@
 tensorflow中的device是一个非常重要的概念，在device中定义了
 
 device相关的对象继承关系非常杂，下图所示：
-![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/deviceTree.png?raw=true)
+
+```mermaid
+
+classDiagram
+  DeviceBase <|--Device
+  Device <|--LocalDevice
+  Device <|--SingleThreadedCPUDevice
+  Device <|--RemoteDevice
+  LocalDevice <|--ThreadPoolDevice
+  LocalDevice <|--BaseGPUDevice
+  LocalDevice <|--PluggableDevice
+  LocalDevice <|--TpuDeviceState
+  BaseGPUDevice <|--GPUDevice
+  ThreadPoolDevice <|--GPUCompatibleCPUDevice
+```
 
 其中localDevice的各种子类由各种factory生成。syclDevice在最新版本的tensorflow中已经换成了plugindevice等设备。不过这些设备都不常用，所以我们把注意力放在localDevice中就好。
 
@@ -252,24 +266,134 @@ void* p = port::AlignedMalloc(num_bytes, alignment);
 return p
 ```
 
+后面专门对allocator做一个整理
+
+EigenThreadPoolInfo 有自己的结构体构造函数, 关键字explicit 只能用于修饰一个构造函数，表名构造函数是显式的
+
+```cpp
+  explicit EigenThreadPoolInfo(const SessionOptions& options, int numa_node,
+                               Allocator* allocator) {
+    // Use session setting if specified.
+    int32_t intra_op_parallelism_threads =
+        options.config.intra_op_parallelism_threads();
+    // If no session setting, use environment setting.
+    if (intra_op_parallelism_threads == 0) {
+      static int env_num_threads = NumIntraOpThreadsFromEnvironment();
+      intra_op_parallelism_threads = env_num_threads;
+      // If no session setting or environment, compute a reasonable default.
+      if (intra_op_parallelism_threads == 0) {
+        intra_op_parallelism_threads = port::MaxParallelism(numa_node);
+      }
+    }
+    ThreadOptions thread_opts;
+    thread_opts.numa_node = numa_node;
+    eigen_worker_threads_.num_threads = intra_op_parallelism_threads;
+    eigen_worker_threads_.workers = new thread::ThreadPool(
+        options.env, thread_opts, strings::StrCat("numa_", numa_node, "_Eigen"),
+        intra_op_parallelism_threads,
+        !options.config.experimental().disable_thread_spinning(),
+        /*allocator=*/nullptr);
+    Eigen::ThreadPoolInterface* threadpool =
+        eigen_worker_threads_.workers->AsEigenThreadPool();
+    if (allocator != nullptr) {
+      eigen_allocator_.reset(new EigenAllocator(allocator));
+    }
+    eigen_device_.reset(new Eigen::ThreadPoolDevice(
+        threadpool, eigen_worker_threads_.num_threads, eigen_allocator_.get()));
+  }
+
+```
+该构造函数接受三个输入，分别是const SessionOptions& options, int numa_node, Allocator* allocator.其中SessionOptions 表示session的一些配置，前面已经介绍过多次；numa_node 是numa节点的个数，在云场景中应用比较多. 最后一个就是Allocator
+
+
+tensorflow/core/common_runtime/local_device.cc，除了实现了上面介绍的EigenThreadPoolInfo，只实现了localDevice的构造函数
+
+
+```cpp
+LocalDevice::LocalDevice(const SessionOptions& options,
+                         const DeviceAttributes& attributes)
+    : Device(options.env, attributes), owned_tp_info_(nullptr) {
+  // Log info messages if TensorFlow is not compiled with instructions that
+  // could speed up performance and are available on the current CPU.
+  port::InfoAboutUnusedCPUFeatures();
+  LocalDevice::EigenThreadPoolInfo* tp_info;
+
+  if (OverrideGlobalThreadPoolFromEnvironment()) {
+    set_use_global_threadpool(false);
+  }
+
+  if (use_global_threadpool_) {
+    mutex_lock l(global_tp_mu_);
+    if (options.config.experimental().use_numa_affinity()) {
+      int numa_node = attributes.locality().numa_node();
+      int num_numa_nodes = port::NUMANumNodes();
+      DCHECK_LT(numa_node, num_numa_nodes);
+      Allocator* numa_allocator =
+          ProcessState::singleton()->GetCPUAllocator(numa_node);
+      while (numa_node >= global_tp_info_.size()) {
+        global_tp_info_.push_back(nullptr);
+      }
+      if (!global_tp_info_[numa_node]) {
+        global_tp_info_[numa_node] = new LocalDevice::EigenThreadPoolInfo(
+            options, numa_node, numa_allocator);
+      }
+      tp_info = global_tp_info_[numa_node];
+    } else {
+      if (global_tp_info_.empty()) {
+        global_tp_info_.push_back(new LocalDevice::EigenThreadPoolInfo(
+            options, port::kNUMANoAffinity, nullptr));
+      }
+      tp_info = global_tp_info_[0];
+    }
+  } else {
+    // Each LocalDevice owns a separate ThreadPoolDevice for numerical
+    // computations.
+    // TODO(tucker): NUMA for these too?
+    owned_tp_info_.reset(new LocalDevice::EigenThreadPoolInfo(
+        options, port::kNUMANoAffinity, nullptr));
+    tp_info = owned_tp_info_.get();
+  }
+  set_tensorflow_cpu_worker_threads(&tp_info->eigen_worker_threads_);
+  set_eigen_cpu_device(tp_info->eigen_device_.get());
+}
+```
+
+这里应该注意的是，在一开始实现了Device的初始化。
+
+
 
 ```mermaid
-graph TB;
-subgraph 分情况
-A(开始)-->B{判断}
-end
-B--第一种情况-->C[第一种方案]
-B--第二种情况-->D[第二种方案]
-B--第三种情况-->F{第三种方案}
-subgraph 分种类
-F-.第1个.->J((测试圆形))
-F-.第2个.->H>右向旗帜形]
-end
-H---I(测试完毕)
-C--票数100---I(测试完毕)
-D---I(测试完毕)
-J---I(测试完毕)
+classDiagram
+  DeviceBase <|--Device: Inheritance
+  DeviceBase : + CpuWorkerThreads* cpu_worker_threads_ = nullptr
+  DeviceBase : + AcceleratorDeviceInfo* accelerator_device_info_ = nullptr
+  DeviceBase : + thread&#58&#58ThreadPool* device_thread_pool_ = nullptr
+  DeviceBase : + std&#58&#58vector&#60Eigen&#58&#58ThreadPoolDevice*> eigen_cpu_devices_
+  DeviceBase  o-- CpuWorkerThreads: Composition
+  CpuWorkerThreads : + int num_threads = 0
+  CpuWorkerThreads : + thread&#58&#58ThreadPool* workers = nullptr
+  DeviceBase o-- AcceleratorDeviceInfo: composition
+  AcceleratorDeviceInfo:+  stream_executor&#58&#58Stream* stream = nullptr
+  AcceleratorDeviceInfo:+  DeviceContext* default_context = nullptr
+  AcceleratorDeviceInfo:+  EventMgr* event_mgr = nullptr
+  AcceleratorDeviceInfo:+  int gpu_id = -1
+  Device <|--LocalDevice : Inheritance
+  Device <|--SingleThreadedCPUDevice : Inheritance
+  Device <|--RemoteDevice : Inheritance
+  LocalDevice <|--ThreadPoolDevice : Inheritance
+  LocalDevice <|--BaseGPUDevice : Inheritance
+  LocalDevice <|--PluggableDevice : Inheritance
+  LocalDevice <|--TpuDeviceState : Inheritance
+  BaseGPUDevice <|--GPUDevice : Inheritance
+  ThreadPoolDevice <|--GPUCompatibleCPUDevice : Inheritance
+
+
 ```
+
+
+
+
+
 
 
 
