@@ -215,5 +215,63 @@ struct LocalDevice::EigenThreadPoolInfo {
 
 ```
 
+EigenThreadPoolInfo是一个结构体, 主要成员是：
+
+```cpp
+DeviceBase::CpuWorkerThreads eigen_worker_threads_;
+std::unique_ptr<Eigen::ThreadPoolDevice> eigen_device_;
+std::unique_ptr<EigenAllocator> eigen_allocator_;
+```
+
+其中CpuWorkerThreads, ThreadPoolDevice在前面都已经介绍过了
+
+EigenAllocator 是一个对象，源码就定义在EigenThreadPoolInfo中：
+
+```cpp
+  class EigenAllocator : public Eigen::Allocator {
+   public:
+    explicit EigenAllocator(tensorflow::Allocator* a) : allocator_(a) {}
+    void* allocate(size_t num_bytes) const override {
+      return allocator_->AllocateRaw(64, num_bytes);
+    }
+    void deallocate(void* buffer) const override {
+      allocator_->DeallocateRaw(buffer);
+    }
+    tensorflow::Allocator* allocator_;
+  };
+```
+
+这个类继承自Eigen::Allocator，本质上就是添加了一个新的属性tensorflow::Allocator* allocator_， 同时有两个Allocator带来的函数AllocateRaw， DeallocateRaw。
+
+Allocator 是一个内存分配的对象， tensorflow中可能用会用到很多设备，如果cpu，gpu。这些设备都有自己的内存(系统内存，显存)。Allocator的作用就是给这些设备分配内存，由于各种设备的分配内存的方式都有不同，所以Allocator下面衍生出了多种子类。同时对于多个设备，可能内存分配的方法都有不同，所以同一种设备可能会有多个allocator。
+
+例如最常见的cpu的内存分配allocator，CPUAllocator，其定义的文件路径在tensorflow/core/framework/cpu_allocator_impl.cc。AllocateRaw的核心代码就是
+
+```cpp
+void* p = port::AlignedMalloc(num_bytes, alignment);
+return p
+```
+
+
+```mermaid
+graph TB;
+subgraph 分情况
+A(开始)-->B{判断}
+end
+B--第一种情况-->C[第一种方案]
+B--第二种情况-->D[第二种方案]
+B--第三种情况-->F{第三种方案}
+subgraph 分种类
+F-.第1个.->J((测试圆形))
+F-.第2个.->H>右向旗帜形]
+end
+H---I(测试完毕)
+C--票数100---I(测试完毕)
+D---I(测试完毕)
+J---I(测试完毕)
+```
+
+
+
 
 
