@@ -413,10 +413,49 @@ classDiagram
   ThreadPoolDevice <--GPUCompatibleCPUDevice : Inheritance
 
   LocalDevice : use_global_threadpool_
-  LocalDevice : std&#58&#58unique_ptr<EigenThreadPoolInfo> owned_tp_info_
+  LocalDevice : std&#58&#58unique_ptr&#60EigenThreadPoolInfo> owned_tp_info_
 
-  
+  LocalDevice o--   EigenThreadPoolInfo : Composition
+
+  EigenThreadPoolInfo   o-- CpuWorkerThreads: Composition
+  EigenThreadPoolInfo : DeviceBase&#58&#58CpuWorkerThreads eigen_worker_threads_
+  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60Eigen&#58&#58ThreadPoolDevice> eigen_device_
+  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
 ```
+其中EigenThreadPoolInfo的结构非常复杂，拆出来分析
+
+```mermaid
+classDiagram
+  EigenThreadPoolInfo   o-- CpuWorkerThreads: Composition
+  EigenThreadPoolInfo : DeviceBase&#58&#58CpuWorkerThreads eigen_worker_threads_
+  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60Eigen&#58&#58ThreadPoolDevice> eigen_device_
+  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
+  CpuWorkerThreads : + int num_threads = 0
+  CpuWorkerThreads : + thread&#58&#58ThreadPool* 
+  EigenThreadPoolInfo o-- ThreadPoolDevice : composition
+  EigenThreadPoolInfo o-- EigenAllocator : composition
+  Eigen__Allocator <-- EigenAllocator: inheritance
+  EigenAllocator : Allocator allocator_
+  EigenAllocator : allocator_->AllocateRaw()
+  EigenAllocator : allocator_->DeallocateRaw()
+  EigenAllocator o-- Allocator: composition
+
+  CpuWorkerThreads o-- ThreadPool 
+  
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
 
 
 
