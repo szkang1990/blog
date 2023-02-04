@@ -256,6 +256,7 @@ EigenAllocator 是一个对象，源码就定义在EigenThreadPoolInfo中：
 ```
 
 这个类继承自Eigen::Allocator，本质上就是添加了一个新的属性tensorflow::Allocator* allocator_， 同时有两个Allocator带来的函数AllocateRaw， DeallocateRaw。
+这里需要注意的是 Eigen::作用域中的对象和tensorflow作用域中的对象不一样，Eigen::Allocator和tensorflow::Allocator完全不一致。
 
 Allocator 是一个内存分配的对象， tensorflow中可能用会用到很多设备，如果cpu，gpu。这些设备都有自己的内存(系统内存，显存)。Allocator的作用就是给这些设备分配内存，由于各种设备的分配内存的方式都有不同，所以Allocator下面衍生出了多种子类。同时对于多个设备，可能内存分配的方法都有不同，所以同一种设备可能会有多个allocator。
 
@@ -303,7 +304,7 @@ EigenThreadPoolInfo 有自己的结构体构造函数, 关键字explicit 只能�
   }
 
 ```
-该构造函数接受三个输入，分别是const SessionOptions& options, int numa_node, Allocator* allocator.其中SessionOptions 表示session的一些配置，前面已经介绍过多次；numa_node 是numa节点的个数，在云场景中应用比较多. 最后一个就是Allocator
+该构造函数接受三个输入，分别是const SessionOptions& options, int numa_node, Allocator* allocator.其中SessionOptions 表示session的一些配置，前面已经介绍过多次；numa_node 是numa节点的个数，在云场景中应用比较多. 最后一个就是Allocator.
 
 
 tensorflow/core/common_runtime/local_device.cc，除了实现了上面介绍的EigenThreadPoolInfo，只实现了localDevice的构造函数
@@ -369,9 +370,6 @@ classDiagram
   DeviceBase : + AcceleratorDeviceInfo* accelerator_device_info_ = nullptr
   DeviceBase : + thread&#58&#58ThreadPool* device_thread_pool_ = nullptr
   DeviceBase : + std&#58&#58vector&#60Eigen&#58&#58ThreadPoolDevice*> eigen_cpu_devices_
-  DeviceBase  o-- CpuWorkerThreads: Composition
-  CpuWorkerThreads : + int num_threads = 0
-  CpuWorkerThreads : + thread&#58&#58ThreadPool* workers = nullptr
   DeviceBase o-- AcceleratorDeviceInfo: composition
   AcceleratorDeviceInfo:+  stream_executor&#58&#58Stream* stream = nullptr
   AcceleratorDeviceInfo:+  DeviceContext* default_context = nullptr
@@ -381,19 +379,16 @@ classDiagram
   DeviceContext:+ void CopyCPUTensorToDevice(const* Tensor, Device* device,Tensor* device_tensor, StatusCallback done, bool sync_dst_compute = true)
   DeviceContext:+ void CopyDeviceTensorToCPU(const Tensor* device_tensor, StringPiece tensor_name, Device* device, Tensor* cpu_tensor, StatusCallback done)
   DeviceContext:+ 用于tensor在各种设备之间的拷贝
+  DeviceBase  o-- CpuWorkerThreads: Composition
+  CpuWorkerThreads : + int num_threads = 0
+  CpuWorkerThreads : + thread&#58&#58ThreadPool* workers = nullptr
+
   Device : + DeviceAttributes device_attributes_
   Device : + DeviceNameUtils&#58&#58ParsedName parsed_name_
   Device : + OpSegment op_seg_
   Device : + ResourceMgr* rmgr_ = nullptr
 
-  Device o-- DeviceAttributes
-  DeviceAttributes : string name = 1
-  DeviceAttributes : string device_type = 2
-  DeviceAttributes : int64 memory_limit = 4
-  DeviceAttributes : DeviceLocality locality = 5
-  DeviceAttributes : fixed64 incarnation = 6
-  DeviceAttributes : string physical_device_desc = 7
-  DeviceAttributes : int64 xla_global_id = 8
+
 
   ParsedName --o Device :composition
   ParsedName : 从deviceName中解析出的信息，由ParseFullName函数得到
@@ -404,7 +399,7 @@ classDiagram
 
   Device <--LocalDevice : Inheritance
   Device <--SingleThreadedCPUDevice : Inheritance
-  Device <--RemoteDevice : Inheritance
+  
   LocalDevice <--ThreadPoolDevice : Inheritance
   LocalDevice <--BaseGPUDevice : Inheritance
   LocalDevice <--PluggableDevice : Inheritance
@@ -412,12 +407,22 @@ classDiagram
   BaseGPUDevice <--GPUDevice : Inheritance
   ThreadPoolDevice <--GPUCompatibleCPUDevice : Inheritance
 
+
   LocalDevice : use_global_threadpool_
   LocalDevice : std&#58&#58unique_ptr&#60EigenThreadPoolInfo> owned_tp_info_
+  Device <--RemoteDevice : Inheritance
+  Device o-- DeviceAttributes
+  DeviceAttributes : string name = 1
+  DeviceAttributes : string device_type = 2
+  DeviceAttributes : int64 memory_limit = 4
+  DeviceAttributes : DeviceLocality locality = 5
+  DeviceAttributes : fixed64 incarnation = 6
+  DeviceAttributes : string physical_device_desc = 7
+  DeviceAttributes : int64 xla_global_id = 8
 
-  LocalDevice o--   EigenThreadPoolInfo : Composition
+  EigenThreadPoolInfo --o LocalDevice: Composition
 
-  EigenThreadPoolInfo   o-- CpuWorkerThreads: Composition
+  CpuWorkerThreads --o EigenThreadPoolInfo   : Composition
   EigenThreadPoolInfo : DeviceBase&#58&#58CpuWorkerThreads eigen_worker_threads_
   EigenThreadPoolInfo : std&#58&#58unique_ptr&#60Eigen&#58&#58ThreadPoolDevice> eigen_device_
   EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
@@ -432,9 +437,9 @@ classDiagram
   EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
   CpuWorkerThreads : + int num_threads = 0
   CpuWorkerThreads : + thread&#58&#58ThreadPool* 
-  EigenThreadPoolInfo o-- ThreadPoolDevice : composition
+  EigenThreadPoolInfo o-- Eigen_ThreadPoolDevice : composition
   EigenThreadPoolInfo o-- EigenAllocator : composition
-  Eigen__Allocator <-- EigenAllocator: inheritance
+  Eigen_Allocator <-- EigenAllocator: inheritance
   EigenAllocator : Allocator allocator_
   EigenAllocator : allocator_->AllocateRaw()
   EigenAllocator : allocator_->DeallocateRaw()
