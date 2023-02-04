@@ -32,7 +32,7 @@ classDiagram
   thread::ThreadPool* device_thread_pool_ = nullptr; \
   std::vector<Eigen::ThreadPoolDevice*> eigen_cpu_devices_;
 
-其中Env是对操作系统相关功能的统一封装，包括了文件系统等功能
+Env是对操作系统相关功能的统一封装，包括了文件系统等功能
 
 CpuWorkerThreads 是一个结构体，定义如下：
 
@@ -72,9 +72,11 @@ device_thread_pool_ 也是一个线程池
 
 eigen_cpu_devices_ Eigen库定义的ThreadPoolDevice类。
 
+
 用一张图来表示device的属性
 ![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/SeaTalk_IMG_1675333664.png?raw=true)
 
+在tensorflow最新的源码中，并没有找到变量cpu_worker_threads_， device_thread_pool_， eigen_cpu_devices_的使用，这三个变量目前是冗余的设计。
 
 deviceBase的函数基本全都是虚函数，所以等到具体实现的时候再做介绍。
 
