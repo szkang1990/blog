@@ -366,10 +366,10 @@ LocalDevice::LocalDevice(const SessionOptions& options,
 ```mermaid
 classDiagram
   DeviceBase <--Device: Inheritance
-  DeviceBase : + CpuWorkerThreads* cpu_worker_threads_ = nullptr
+  DeviceBase : + CpuWorkerThreads* cpu_worker_threads_ = nullptr 没用
   DeviceBase : + AcceleratorDeviceInfo* accelerator_device_info_ = nullptr
-  DeviceBase : + thread&#58&#58ThreadPool* device_thread_pool_ = nullptr
-  DeviceBase : + std&#58&#58vector&#60Eigen&#58&#58ThreadPoolDevice*> eigen_cpu_devices_
+  DeviceBase : + thread&#58&#58ThreadPool* device_thread_pool_ = nullptr 没用
+  DeviceBase : + std&#58&#58vector&#60Eigen&#58&#58ThreadPoolDevice*>  eigen_cpu_devices_  没用
   DeviceBase o-- AcceleratorDeviceInfo: composition
   AcceleratorDeviceInfo:+  stream_executor&#58&#58Stream* stream = nullptr
   AcceleratorDeviceInfo:+  DeviceContext* default_context = nullptr
@@ -429,6 +429,8 @@ classDiagram
 ```
 其中EigenThreadPoolInfo的结构非常复杂，拆出来分析
 
+
+
 ```mermaid
 classDiagram
   EigenThreadPoolInfo   o-- CpuWorkerThreads: Composition
@@ -446,10 +448,6 @@ classDiagram
   EigenAllocator o-- Allocator: composition
 
   CpuWorkerThreads o-- ThreadPool 
-  
-
-
-
 ```
 
 
