@@ -2,7 +2,8 @@
 
 tensorflow中的device是一个非常重要的概念，在device中定义了
 
-device相关的对象继承关系非常杂，下图所示：
+device相关的对象继承关系非常复杂，其中还包括很多eigen库的对象. Device
+的总体继承关系如下图所示：
 
 ```mermaid
 
@@ -23,7 +24,7 @@ classDiagram
 
 
 我们先来看deviceBase
-## DeviceBase
+## 1. DeviceBase
 &emsp;DeviceBase是device的基类。主要的属性如下：
 >  Env* const env_;\
   CpuWorkerThreads* cpu_worker_threads_ = nullptr;\
@@ -42,7 +43,7 @@ CpuWorkerThreads 是一个结构体，定义如下：
     thread::ThreadPool* workers = nullptr;
   };
 ```
-可以看到cpu_worker_threads_其实就是对线程池的简单封装
+可以看到cpu_worker_threads_其实就是对线程池的简单封装，不过在DeviceBase中，cpu_worker_threads_并没有用到，可能是在代码的重构过程中把这个属性逐渐下放到了子类中,这里先不介绍，后面真的用到的时候再介绍。
 
 
 accelerator_device_info_,在很多博客中叫 gpu_device_info_, 是一个用于描述gpu或者其他设备的结构体，结构体的定义为
@@ -68,31 +69,55 @@ class DeviceContext : public core::RefCounted {
 
 可以看到DeviceContext的主要作用就是提供两个接口，用于tensor在cpu和其他设备之间的相互拷贝
 
-device_thread_pool_ 也是一个线程池
+thread::ThreadPool device_thread_pool_ 也是一个线程池。在deviceBase中没有用到，后面再讲。
 
-eigen_cpu_devices_ Eigen库定义的ThreadPoolDevice类。
+std::vector<Eigen::ThreadPoolDevice*> eigen_cpu_devices_ Eigen库定义的ThreadPoolDevice类，没有用到，后面再讲。
 
 
 用一张图来表示device的属性
-![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/SeaTalk_IMG_1675333664.png?raw=true)
+```mermaid
+graph LR;
+  DeviceBase --> AcceleratorDeviceInfo
+  AcceleratorDeviceInfo --> CopyCPUTensorToDevice
+  AcceleratorDeviceInfo --> CopyDeviceTensorToCPU
+  subgraph 没用
+  DeviceBase --> Eigen::ThreadPoolDevice
+  DeviceBase --> CpuWorkerThreads
+  DeviceBase --> thread::ThreadPool
+  CpuWorkerThreads --> thread::ThreadPool 
+  end
+```
 
 在tensorflow最新的源码中，并没有找到变量cpu_worker_threads_， device_thread_pool_， eigen_cpu_devices_的使用，这三个变量目前是冗余的设计。
 
 deviceBase的函数基本全都是虚函数，所以等到具体实现的时候再做介绍。
 
 
-## device
+## 2. device
 
 deviceBase 只有一个子类就是device，device定义在tensorflow/core/framework/device.h， tensorflow/core/framework/device.cc。主要属性如下：
 
->   DeviceAttributes device_attributes_; \
-  DeviceNameUtils::ParsedName parsed_name_; \
-  // op_seg_ maps session handle and op name to OpKernel objects. \
-  OpSegment op_seg_; \
-  // Resources associated w/ this device. E.g., shared variables, etc. \
+```cpp
+  DeviceAttributes device_attributes_; 
+  DeviceNameUtils::ParsedName parsed_name_; 
+  // op_seg_ maps session handle and op name to OpKernel objects. 
+  OpSegment op_seg_; 
+  // Resources associated w/ this device. E.g., shared variables, etc. 
   ResourceMgr* rmgr_ = nullptr;
+```
+
+```mermaid
+graph LR;
+  Device --> DeviceAttributes
+  Device --> DeviceNameUtils::ParsedName
+  Device --> ResourceMgr
+  subgraph 没有用
+  Device --> OpSegment
+  end
+```
 
 
+### 2.1 DeviceAttributes
 其中 DeviceAttributes 是一个被proto定义的对象，proto 路径为tensorflow/core/framework/device_attributes.proto。DeviceAttributes定义如下：
 
 ```cpp
@@ -123,13 +148,19 @@ message DeviceAttributes {
   int64 xla_global_id = 8;
 }
 ```
-
+### 2.2 parsed_name_
 parsed_name_ 被拆解的设备名称, 一般是设备名称的格式类似于“/job:train/replica:0/task:3/gpu:2”， parsed_name_ 表示对这个名称拆解。具体的拆解方法在函数tensorflow/core/util/device_name_utils.cc  的ParseFullName中。
 
+### 2.3 ResourceMgr
 ResourceMgr  resource的管理类，定义在tensorflow/core/framework/resource_mgr.h  resource是指在不同节点，不同设备之间共享的tensor, 队列等各种数据。
 
+### 2.4 OpSegment
+OpSegment用于记录session和kernel之间的意义对应关系，OpSegment定义在tensorflow/core/framework/op_segment.h， 其核心的属性是std::unordered_map<string, Item*> SessionMap，key是session_name， value 是包装了kernel的结构体。但是OpSegment这个属性后来没有被用到。
 
-OpSegment用于记录session和kernel之间的意义对应关系，OpSegment定义在tensorflow/core/framework/op_segment.h， 其核心的属性是std::unordered_map<string, Item*> SessionMap，key是session_name， value 是包装了kernel的结构体。
+
+
+
+### 2.5 构造函数
 
 Device对象的函数同样大多数都是虚函数，还有一些是非常简单的返回一个属性的函数，所以只介绍一下构造函数：
 
@@ -157,18 +188,53 @@ ResourceMgr::ResourceMgr(const string& default_container)
     : default_container_(default_container) {}
 ```
 
-## localDevice
+## 3. localDevice
 localDevice是最常用的Device子类，localDevice定义在tensorflow/core/common_runtime/local_device.h， tensorflow/core/common_runtime/local_device.cc。因为不会直接实例化，所以localDevice的属性也非常简单，最常用的属性如下：
 
 ```cpp
 static bool use_global_threadpool_;  # 是否使用全局线程池
 std::unique_ptr<EigenThreadPoolInfo> owned_tp_info_; device自己的线程池
-
 ```
 
+```mermaid
+graph LR
+  use_global_threadpool_ --> localDevice
+  EigenThreadPoolInfo  --> localDevice
+```
 
+其中，EigenThreadPoolInfo是最重要的一个属性,是一个包装了Eigen线程池的结构体。DeviceBase，Device中虽然定义了很多线程池的属性，但是在最近版本的源码中都被废弃了，改为用EigenThreadPoolInfo中直接调用Eigen库的线程池。
+### 3.1 EigenThreadPoolInfo
 
-其中，EigenThreadPoolInfo是一个结构体
+EigenThreadPoolInfo是一个结构体，主要的继承关系如下：
+```mermaid
+classDiagram
+  EigenThreadPoolInfo   o-- CpuWorkerThreads: Composition
+  EigenThreadPoolInfo : DeviceBase&#58&#58CpuWorkerThreads eigen_worker_threads_
+  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60Eigen&#58&#58ThreadPoolDevice> eigen_device_
+  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
+  CpuWorkerThreads : + int num_threads = 0
+  CpuWorkerThreads : + thread&#58&#58ThreadPool* 
+  EigenThreadPoolInfo o-- Eigen_ThreadPoolDevice : composition
+  EigenThreadPoolInfo o-- EigenAllocator : composition
+  Eigen_Allocator <-- EigenAllocator: inheritance
+  EigenAllocator : Allocator allocator_
+  EigenAllocator : allocator_->AllocateRaw()
+  EigenAllocator : allocator_->DeallocateRaw()
+  EigenAllocator o-- Allocator: composition
+  CpuWorkerThreads o-- ThreadPool 
+  ThreadPool : Eigen_ThreadPoolInterface
+  ThreadPool : Eigen_ThreadPoolTempl
+  ThreadPool : Eigen_ThreadPoolDevice
+  ThreadPool o-- Eigen_ThreadPoolTempl : composition
+  ThreadPool o-- Eigen_ThreadPoolInterface : composition
+  ThreadPool o-- Eigen_ThreadPoolDevice : composition
+  Eigen_ThreadPoolInterface <-- Eigen_ThreadPoolTempl : inheritance
+  Eigen_ThreadPoolDevice o-- Eigen_ThreadPoolInterface : composition
+  Eigen_Allocator --o Eigen_ThreadPoolDevice
+```
+应该注意的是，ThreadPool中的Eigen::ThreadPoolDevice 和 EigenThreadPoolInfo 中的Eigen::ThreadPoolDevice是同一个类，但不是同一个对象。在EigenThreadPoolInfo的构造函数中重建了一个Eigen::ThreadPoolDevice对象。
+
+EigenThreadPoolInfo源码如下
 
 ```cpp
 struct LocalDevice::EigenThreadPoolInfo {
@@ -227,19 +293,147 @@ struct LocalDevice::EigenThreadPoolInfo {
   std::unique_ptr<EigenAllocator> eigen_allocator_;
 };
 
-
-
 ```
 
-EigenThreadPoolInfo是一个结构体, 主要成员是：
+EigenThreadPoolInfo有三个重要的属性：
 
 ```cpp
 DeviceBase::CpuWorkerThreads eigen_worker_threads_;
 std::unique_ptr<Eigen::ThreadPoolDevice> eigen_device_;
 std::unique_ptr<EigenAllocator> eigen_allocator_;
 ```
+其中，CpuWorkerThreads 和 Eigen::ThreadPoolDevice的作用类似。
+#### 3.1.1CpuWorkerThreads
+CpuWorkerThreads在前面都已经介绍过了，是一个线程池和一个记录线程数的int：
+```cpp
+  struct CpuWorkerThreads {
+    int num_threads = 0;
+    thread::ThreadPool* workers = nullptr;
+  };
+```
 
-其中CpuWorkerThreads, ThreadPoolDevice在前面都已经介绍过了
+##### 3.1.1.1 thread::ThreadPool
+其中thread::ThreadPool是一个定义线程池的对象，源码在tensorflow/core/platform/threadpool.cc和tensorflow/core/platform/threadpool.cc。thread::ThreadPool的核心属性是
+```cpp
+  // underlying_threadpool_ is the user_threadpool if user_threadpool is
+  // provided in the constructor. Otherwise it is the eigen_threadpool_.
+  Eigen::ThreadPoolInterface* underlying_threadpool_;
+  // eigen_threadpool_ is instantiated and owned by thread::ThreadPool if
+  // user_threadpool is not in the constructor.
+  std::unique_ptr<Eigen::ThreadPoolTempl<EigenEnvironment>> eigen_threadpool_;
+  std::unique_ptr<Eigen::ThreadPoolDevice> threadpool_device_;
+```
+这三个属性之间都是Eigen库线程池相关的对象，Eigen的各个对象之间继承关系如下：
+
+```mermaid
+classDiagram
+Eigen__ThreadPoolInterface <-- Eigen__ThreadPoolTempl: inhreitance
+Eigen__ThreadPoolDevice  o-- Eigen__ThreadPoolInterface : composition
+Eigen__ThreadPoolDevice : 最终目的
+```
+
+从构造函数中可以看到，这三个属性之间也有非常密切的关系。
+
+ThreadPool::ThreadPool构造函数如下：
+
+```cpp
+ThreadPool::ThreadPool(Env* env, const ThreadOptions& thread_options,
+                       const string& name, int num_threads,
+                       bool low_latency_hint, Eigen::Allocator* allocator) {
+  CHECK_GE(num_threads, 1);
+  eigen_threadpool_.reset(new Eigen::ThreadPoolTempl<EigenEnvironment>(
+      num_threads, low_latency_hint,
+      EigenEnvironment(env, thread_options, "tf_" + name)));
+  underlying_threadpool_ = eigen_threadpool_.get();
+  threadpool_device_.reset(new Eigen::ThreadPoolDevice(underlying_threadpool_,
+                                                       num_threads, allocator));
+}
+```
+在构造函数的函数体中，Eigen::ThreadPoolTempl这个对象是从ThreadPoolInterface继承而来的.
+
+
+而在函数体中做了这些事：
+* 首先根据num_threads, low_latency_hint, thread_options，name几个属性新建了对象Eigen::ThreadPoolTempl 赋值给eigen_threadpool_
+* 因为Eigen::ThreadPoolTempl是Eigen::ThreadPoolInterface所以直接把Eigen::ThreadPoolTempl的值赋给了Eigen::ThreadPoolInterface。在源码中因为用了一个Eigen::ThreadPoolTempl的智能指针，所以用到了get函数
+* 最后根据Eigen::ThreadPoolInterface的值创建了对象Eigen::ThreadPoolDevice
+
+所以ThreadPool::ThreadPool 的最根本目的就是创建一个Eigen::ThreadPoolDevice对象。
+
+
+ThreadPool::ThreadPool构造函数入参是为：
+```cpp
+Env* env
+const ThreadOptions& thread_options; // 用于创建ThreadPoolTempl
+const string& name // 用于创建ThreadPoolTempl
+int num_threads  
+bool low_latency_hint,
+Eigen::Allocator* allocator; // 用于创建Eigen::ThreadPoolDevice
+```
+
+其中ThreadOptions是一个结构体，用于定义线程池的基本配置，成员全是基本数据结构
+```cpp
+struct ThreadOptions {
+  /// Thread stack size to use (in bytes).
+  size_t stack_size = 0;  // 0: use system default value
+  /// Guard area size to use near thread stacks to use (in bytes)
+  size_t guard_size = 0;  // 0: use system default value
+  int numa_node = port::kNUMANoAffinity;
+};
+```
+
+综上CpuWorkerThreads的具体对象结构如下
+```mermaid
+classDiagram
+CpuWorkerThreads o-- Thread__ThreadPool:composition
+Thread__ThreadPool o-- Eigen__ThreadPoolInterface :composition
+Thread__ThreadPool o-- Eigen__ThreadPoolTempl :composition
+Thread__ThreadPool o-- Eigen__ThreadPoolDevice :composition
+Eigen__ThreadPoolInterface <-- Eigen__ThreadPoolTempl: inhreitance
+Eigen__ThreadPoolInterface .. Eigen__ThreadPoolTempl: 赋值
+Eigen__ThreadPoolDevice  o-- Eigen__ThreadPoolInterface : composition
+Eigen__ThreadPoolDevice : 最终目的
+```
+#### 3.1.2 Eigen::ThreadPoolDevice
+Eigen::ThreadPoolDevice是Eigen库中的一个结构体，主要的属性是：
+
+```cpp
+  ThreadPoolInterface* pool_;
+  int num_threads_;
+```
+
+
+##### 3.1.2.1 ThreadPoolInterface
+
+
+##### 3.1.2.2 Eigen::ThreadPoolDevice的函数
+
+Eigen::ThreadPoolDevice的函数主要是一些内存的操作，以及ThreadPoolInterface的函数，例如：
+```cpp
+  EIGEN_STRONG_INLINE void* allocate(size_t num_bytes) const {
+    return internal::aligned_malloc(num_bytes);
+  }
+
+  EIGEN_STRONG_INLINE void deallocate(void* buffer) const {
+    internal::aligned_free(buffer);
+  }
+  template <class Function, class... Args>
+  EIGEN_STRONG_INLINE Notification* enqueue(Function&& f, Args&&... args) const {
+    Notification* n = new Notification();
+    pool_->Schedule(std::bind(&FunctionWrapperWithNotification<Function, Args...>::run, n, f, args...));
+    return n;
+  }
+```
+
+我们来看一下Eigen::ThreadPoolDevice的构造函数：
+
+```cpp
+  ThreadPoolDevice(ThreadPoolInterface* pool, int num_cores) : pool_(pool), num_threads_(num_cores) { }
+```
+
+
+
+
+#### 3.1.3 EigenAllocator
 
 EigenAllocator 是一个对象，源码就定义在EigenThreadPoolInfo中：
 
@@ -271,7 +465,9 @@ return p
 
 后面专门对allocator做一个整理
 
-EigenThreadPoolInfo 有自己的结构体构造函数, 关键字explicit 只能用于修饰一个构造函数，表名构造函数是显式的
+#### 3.1.4 EigenThreadPoolInfo的构造函数
+
+&emsp;EigenThreadPoolInfo 有自己的结构体构造函数, 关键字explicit只能用于修饰一个构造函数，表名构造函数是显式的
 
 ```cpp
   explicit EigenThreadPoolInfo(const SessionOptions& options, int numa_node,
@@ -304,11 +500,16 @@ EigenThreadPoolInfo 有自己的结构体构造函数, 关键字explicit 只能�
     eigen_device_.reset(new Eigen::ThreadPoolDevice(
         threadpool, eigen_worker_threads_.num_threads, eigen_allocator_.get()));
   }
-
 ```
-该构造函数接受三个输入，分别是const SessionOptions& options, int numa_node, Allocator* allocator.其中SessionOptions 表示session的一些配置，前面已经介绍过多次；numa_node 是numa节点的个数，在云场景中应用比较多. 最后一个就是Allocator.
+该构造函数接受三个输入，分别是const SessionOptions& options, int numa_node, Allocator* allocator.其中SessionOptions 表示session的一些配置，前面已经介绍过多次；numa_node 是numa节点的个数，在云场景中应用比较多。最后一个就是Allocator.
+
+&emsp;在这个构造函数中做了两件事
+* 给属性CpuWorkerThreads：eigen_worker_threads_赋值： num_threads是从SessionOptions中读取，并且新建一个thread::ThreadPool对象。
+* 在上面已经介绍了，thread::ThreadPool会创建一个Eigen::TreadPoolDevice和Eigen::ThreadPoolInterface。所以把thread::ThreadPool中的Eigen::ThreadPoolInterface用作参数创建了Eigen::ThreadPoolDevice，作为参数std::unique_ptr<Eigen::ThreadPoolDevice> eigen_device_的值。
 
 
+
+### 3.2 LocalDevice的构造函数
 tensorflow/core/common_runtime/local_device.cc，除了实现了上面介绍的EigenThreadPoolInfo，只实现了localDevice的构造函数
 
 
@@ -429,28 +630,7 @@ classDiagram
   EigenThreadPoolInfo : std&#58&#58unique_ptr&#60Eigen&#58&#58ThreadPoolDevice> eigen_device_
   EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
 ```
-其中EigenThreadPoolInfo的结构非常复杂，拆出来分析
 
-
-
-```mermaid
-classDiagram
-  EigenThreadPoolInfo   o-- CpuWorkerThreads: Composition
-  EigenThreadPoolInfo : DeviceBase&#58&#58CpuWorkerThreads eigen_worker_threads_
-  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60Eigen&#58&#58ThreadPoolDevice> eigen_device_
-  EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
-  CpuWorkerThreads : + int num_threads = 0
-  CpuWorkerThreads : + thread&#58&#58ThreadPool* 
-  EigenThreadPoolInfo o-- Eigen_ThreadPoolDevice : composition
-  EigenThreadPoolInfo o-- EigenAllocator : composition
-  Eigen_Allocator <-- EigenAllocator: inheritance
-  EigenAllocator : Allocator allocator_
-  EigenAllocator : allocator_->AllocateRaw()
-  EigenAllocator : allocator_->DeallocateRaw()
-  EigenAllocator o-- Allocator: composition
-
-  CpuWorkerThreads o-- ThreadPool 
-```
 
 
 
