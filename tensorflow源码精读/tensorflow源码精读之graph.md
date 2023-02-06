@@ -393,6 +393,7 @@ std::vector<Edge*> edges_;
 
 &emsp;这几个属性都很好理解，一个graph核心的属性就是graph的Node，edge，此外还有graph的版本这个和tensorflow的迭代有关，arena用于给graph分配内存，op用于添加op。op的数据类型是对象FunctionLibraryDefinition，后面会做详细介绍。
 
+### graph的构造函数
 &emsp;graph的构造函数如下：
 ```cpp
 
@@ -431,6 +432,7 @@ std::vector<Node*> nodes_;
 
 &emsp;同时再tensorflow的图中，必要要有一个起点source node和终点sink node。所以在构造函数的函数体中，通过addNode添加了两个Node：“_SINK”和“_SOURCE”
 
+### AddNode函数
 &emsp;addNode是Graph中一个非常重要的函数，这里着重介绍一下，addNode的源码如下：
 ```cpp
 Node* Graph::AddNode(NodeDef node_def, Status* status) {
@@ -775,7 +777,7 @@ FunctionLibraryDefinition::FunctionLibraryDefinition(
   }
 }
 ```
-在grap的构造函数中，闯入的形参分别是
+在graph的构造函数中，传入的形参分别是
 >ops_(ops, FunctionDefLibrary())
 >ops是静态变量OpRegistry，记录了所有的op注册信息。
 
