@@ -4,8 +4,21 @@
 
 &emsp;DirectionSessionFactory和GrpcSessionFactory都继承自SessionFactory。各个对象之间的关系如下图所示。
 
-![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/v2-674be7969c2aaf9726b1a43da27af45e_r.jpeg?raw=true)
+```mermaid
+classDiagram
+  SessionFacotry <-- DirectSessionFactory:inheritance
+  SessionFacotry <-- GrpcSessionFactory:inheritance
+  DirectSessionFactory:target=""
+  GrpcSessionFactory:target="grpc&#58&#47&#47master&#58port"
+  DirectSessionFactory *-- DirectSession: Create
+  GrpcSessionFactory *-- GrpcSession: Create
+  DirectSession --> Session : inheritance
+  GrpcSession --> Session: inheritance
 
+```
+
+
+## SessionFacotry
 &emsp;首先来看SessionFactory的源码
 
 ```cpp
@@ -59,7 +72,9 @@ class SessionFactory {
 >AcceptsOptions \
 >GetFactory 
 
-除了对象的成员函数之外，还有一些比较重要的变量
+
+### SessionFactories和session_factories()
+除了对象的成员函数之外，还有一个比较重要的变量和函数SessionFactories和session_factories()
 
 ```cpp
 typedef std::unordered_map<string, SessionFactory*> SessionFactories;
@@ -69,10 +84,11 @@ SessionFactories* session_factories() {
 }
 ```
 
-SessionFactories是一个用于注册SessionFactory的map。key是DIRECT_SESSION或者是GRPC_SESSION。应该注意的是，session_factories函数的返回结果是一个static类型的变量，这个变量只会初始化一次，这在[c++中static变量的初始化](https://github.com/szkang1990/blog/blob/main/c%2B%2B%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/c%2B%2B%E4%B8%ADstatic%E5%8F%98%E9%87%8F%E5%88%9D%E5%A7%8B%E5%8C%96.md)中有介绍
+SessionFactories是一个用于注册SessionFactory的map。key是”DIRECT_SESSION“或者是”GRPC_SESSION“。session_factories函数生成了一个静态的SessionFactories，保证所有的注册数据都写入同一个变量中。SessionFactories这个变量只会初始化一次，这在[c++中static变量的初始化](https://github.com/szkang1990/blog/blob/main/c%2B%2B%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0/c%2B%2B%E4%B8%ADstatic%E5%8F%98%E9%87%8F%E5%88%9D%E5%A7%8B%E5%8C%96.md)中有介绍
 
 
-SessionFactories的写入函数也被定义在SessionFactory中，两个子类DirectionSessionFactory和GrpcSessionFactory都是通过调用这个函数写入SessionFactories
+### Register函数
+Register函数调用session_factories()获得格式是静态变量的SessionFactories，并且向其中写注册信息。
 ```cpp
 void SessionFactory::Register(const string& runtime_type,
                               SessionFactory* factory) {
@@ -84,7 +100,9 @@ void SessionFactory::Register(const string& runtime_type,
 }
 ```
 
-生成sessionFactories的函数是
+
+### GetFactory函数
+getFactory函数是从注册信息SessionFactories中获取目的SessionFactory
 
 ```cpp
 Status SessionFactory::GetFactory(const SessionOptions& options,
@@ -134,13 +152,25 @@ Status SessionFactory::GetFactory(const SessionOptions& options,
   }
 }
 ```
+在上面的代码中，首先创建了一个SessionFactory的vector  candidate_factories，然后调用AcceptsOptions遍历筛选SessionFactories中的SessionFactory，如果将筛选结果写入candidate_factories。AcceptsOptions的筛选方法，读取SessionOptions 中的配置，如果和SessionFactories中的匹配，就返回True。
 
-这段代码的目的是根据options生成一个sessionfactory并且写进out_factory。session_factories的返回值是一个静态map，SessionFactories。这个map在Register 被写入内容。AcceptsOptions是一个虚函数，在sessionfactory的子类DirectionSessionFactory和GrpcSessionFactory中被重写。
+如果AcceptsOptions返回true了，说明有DirectionSessionFactory和GrpcSessionFactory被注册在SessionFactories。而且和option相匹配。则把相应的SessionFactory放进candidate_factory。正常情况下，option只能和一种SessionFactory匹配，即有且仅有一种SessionFactory被放进candidate_factory，
+
+在遍历过SessionFactories以后，如果candidate_factories中的元素不等于1，则抛出错误。
+
+AcceptsOptions是一个虚函数，在各个子类中实现。
+
+注意这个时候只是完成了SessionFactory，还没有创建session，创建session的需要调用SessionFactory的NewSession实现。NewSession也是
 
 
 
+## DirectSessionFactory
+
+DirectSessionFactory的源码在tensorflow/core/common_runtime/direct_session.cc 和 tensorflow/core/common_runtime/direct_session.h中，在这个文件中还有DirectSession的代码
+
+### AcceptsOptions函数
+上面已经介绍了，AcceptsOptions用于匹配sessionoption和sesionfactories
 在DirectSessionFactory中AcceptsOptions的代码是：
-
 ```cpp
   // DirectionSessionFactory定义
   bool AcceptsOptions(const SessionOptions& options) override {
@@ -155,9 +185,11 @@ Status SessionFactory::GetFactory(const SessionOptions& options,
   }
 ```
 
-大概含义是通过一系列的条件判断option是否是单机运行的option，如果是则返回true。其中options.target为空的时候，就和上面图中的内容对应。
+大概含义是通过一系列的条件(例如target是否为空)判断option是否是单机运行的option，如果是则返回true。其中options.target为空的时候，就和上面图中的内容对应。
 
-如果AcceptsOptions返回true了，说明有DirectionSessionFactory和GrpcSessionFactory被注册在SessionFactories。而且和option相匹配。则把相应的SessionFactory放进candidate_factory。正常情况下，option只能和一种SessionFactory匹配，即有且仅有一种SessionFactory被放进candidate_factory，如果candidate_factory的大小不等于1，则报错。如果等于1，则这个SessionFactory被赋值给out_factory。注意这个时候只是完成了SessionFactory，还没有创建session，创建session的需要调用SessionFactory的NewSession实现。
+
+
+### NewSession函数
 
 NewSession也是在SessionFactory中被定义的虚函数，由子类DirectionSessionFactory和GrpcSessionFactory实现。下面来看一下实现过程：
 
@@ -200,22 +232,29 @@ NewSession也是在SessionFactory中被定义的虚函数，由子类DirectionSe
     return OkStatus();
   }
 
-  // GrpcSessionFactory 实现过程
-  Status NewSession(const SessionOptions& options,
-                    Session** out_session) override {
-    std::unique_ptr<GrpcSession> session;
-    TF_RETURN_IF_ERROR(GrpcSession::Create(options, &session));
-    *out_session = session.release();
-    return OkStatus();
-  }
 ```
 
-在DirectionSessionFactory中，通过传入的SessionOptions，然后分配一个device，调用DirectSession生成一个Session
+在NewSession中，首先是一些列的session信息的判断，例如option中的session_metadata version不能为负值，session_metadata的不能重名等。
+核心部分是
+```cpp
+    std::vector<std::unique_ptr<Device>> devices;
+    TF_RETURN_IF_ERROR(DeviceFactory::AddDevices(
+        options, "/job:localhost/replica:0/task:0", &devices));
 
-这里面有很多准备工作，例如option中的session_metadata version不能为负值，session_metadata的不能重名等。还有一个cpu的操作函数EnableCPUAllocatorFullStats 和 device操作函数，DeviceFactory::AddDevices。这个回头再讲。
+    DirectSession* session = new DirectSession(
+        options, new StaticDeviceMgr(std::move(devices)), this);
+    {
+      mutex_lock l(sessions_lock_);
+      sessions_.push_back(session);
+    }
+    *out_session = session;
+```
+代码比较简单，就是调用DeviceFactory::AddDevices 生成了所用要用到的device，并且写入std::vector<std::unique_ptr<Device>> devices。这里有一个细节需要注意一下，在单机训练的环境下，device的前缀是/job:localhost/replica:0/task:0，说明单机环境整个任务只有一个task。
+
+生成devices以后，以devices为入参创建一个DirectSession，并且赋值给入参out_session
 
 
-
+### DirectSession构造函数
 ```cpp
 DirectSession::DirectSession(const SessionOptions& options,
                              const DeviceMgr* device_mgr,

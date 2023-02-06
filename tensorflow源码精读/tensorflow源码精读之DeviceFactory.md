@@ -2,7 +2,17 @@
 
 tensorflow中有很多的DeviceFactory, 各个DeviceFactory的继承关系如下：
 
-![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/deviceFactory.png?raw=true)
+
+```mermaid
+graph TD
+TreahPoolDeviceFactory --> DeviceFactory
+GPUCompatibleCPUDevice --> DeviceFactory
+BaseGPUDeviceFactory --> DeviceFactory
+GPUDeviceFactory --> BaseGPUDeviceFactory
+PluggableDeviceFactory --> DeviceFactory
+TpuNodeDeviceFactory --> DeviceFactory
+
+```
 
 其中DeviceFactory是所有所有factory的父类，由其集成出的各类factory中用的最多的就是
 >ThreadPoolDeviceFactory ：用于创建ThreadPoolDevice，是CPU Device 的实现 \
@@ -12,7 +22,7 @@ BaseGPUDeviceFactory && GPUDeviceFactory： 用于生成BaseGPUDevice和GPUDevic
 
 其他factory比较少用到，而且从上面的三个就能大概明白factory的工作原理了。
 
-### DeviceFactory
+## DeviceFactory
 &emsp;首先看一下父类DeviceFactory的定义，DeviceFactory的定义放在tensorflow\core\framework\device_factory.h和tensorflow\core\framework\device_factory.cc中。DeviceFactory对象的定义是：
 ```cpp
 class DeviceFactory {
@@ -105,7 +115,7 @@ class DeviceFactory {
 ![avatar](https://github.com/szkang1990/blog/blob/main/tensorflow%E6%BA%90%E7%A0%81%E7%B2%BE%E8%AF%BB/image/devicefactory2.png?raw=true)
 
 下面介绍一些常用的函数：
-#### Register
+### Register
 Register函数用于deviceFactory的注册。
 
 ```cpp
@@ -156,7 +166,7 @@ struct FactoryItem {
 };
 ```
 
-#### getFactory
+### getFactory
 getFactory函数,即根据key从注册map中获取DeviceFactory
 
 ```cpp
@@ -175,8 +185,8 @@ DeviceFactory* DeviceFactory::GetFactory(const string& device_type) {
 }
 ```
 
-#### NewDevice
-&emsp;NewDevice函数，用于从deviceFActory生成一个eDevices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个子类中。
+### NewDevice
+&emsp;NewDevice函数，用于从deviceFActory生成一个Devices对象。入参是deviceFactory的key，根据key从注册map中找到对应的DeviceFactory，然后调用DeviceFactory的CreateDevices生成Device对象。CreateDevices是一个虚函数，具体的实现过程被写在各个子类中。
 
 ```cpp
 std::unique_ptr<Device> DeviceFactory::NewDevice(const string& type,
@@ -199,7 +209,7 @@ std::unique_ptr<Device> DeviceFactory::NewDevice(const string& type,
   return std::move(devices[0]);
 }
 ```
-#### AddCpuDevices
+### AddCpuDevices
 AddCpuDevices是从注册的deviceFactory中获取cpu的device(在deviceFacotries中，每种deviceFactory只能注册一个，因为都是以设备名称为key，重复注册会相互覆盖），然后创建一个CreateDevices。
 
 ```cpp
@@ -221,7 +231,46 @@ Status DeviceFactory::AddCpuDevices(
 }
 ```
 
-#### ListAllPhysicalDevices
+### AddDevices
+
+```cpp
+Status DeviceFactory::AddDevices(
+    const SessionOptions& options, const string& name_prefix,
+    std::vector<std::unique_ptr<Device>>* devices) {
+  // CPU first. A CPU device is required.
+  // TODO(b/183974121): Consider merge the logic into the loop below.
+  TF_RETURN_IF_ERROR(AddCpuDevices(options, name_prefix, devices));
+
+  auto cpu_factory = GetFactory("CPU");
+  // Then the rest (including GPU).
+  mutex_lock l(*get_device_factory_lock());
+  for (auto& p : device_factories()) {
+    auto factory = p.second.factory.get();
+    if (factory != cpu_factory) {
+      TF_RETURN_IF_ERROR(factory->CreateDevices(options, name_prefix, devices));
+    }
+  }
+
+  return Status::OK();
+}
+```
+### NewDevice、AddCpuDevices、AddDevices的区别
+
+* NewDevice函数是创建一个device，并且返回，这个device可以是任何类型的device
+* AddCpuDevices 是获取CPU类型的DeviceFacotry，在sessionoption中可能会配置多个cpu，就会创建读个cpu类型的Device。device 创建后不会返回，而是直接写入函数的入参std::vector<std::unique_ptr<Device>>* devices
+* AddDevices 是创建所有类型的device，每个类型的device的数量取决于sessionoption，生成的device同样写入入参std::vector<std::unique_ptr<Device>>* devices
+  
+&emsp;&emsp;一般情况下，生成device只会调用DeviceFacotry的上面的三个函数，而不是调用具体的子类例如ThreadPoolDeviceFactory。在DeviceFacotry中会具体确定要生成什么类型的deivceFactory,并且调用相应的createDevice这些虚函数。这样可以保证代码的统一。
+
+例如，我们要生成一个cpu和gpu类型的Device，只需要这样写
+```cpp
+DeviceFactory::NewDevice("CPU", options,"local")
+DeviceFactory::NewDevice("GPU", options,"local")
+```
+在NewDevice 中会根据第一个参数获取相应的factory，生成对应的device。
+
+
+### ListAllPhysicalDevices
 &emsp;光从名字就能看出来这个函数用于列出所有的物理设备。其实是列举出被注册在deviceFactories的设备。这里说的物理设备其实还是对设备的抽象。这个函数由两部分组成，第一部分是列出CPU，CPU是必须要有的，如果没有找到CPU的deviceFacotries则会报错。找到CPU的factory后，通过factory的ListPhysicalDevices列出CPU，如果没有找到CPU设备，同样要报错。然后就是列出CPU以外的所有设备。
 
 ```cpp
@@ -254,6 +303,7 @@ Status DeviceFactory::ListAllPhysicalDevices(std::vector<string>* devices) {
 ```
 
 上面用到了ListPhysicalDevices，ListPhysicalDevices被实现在各种deviceFactory子类中。后面会有详细介绍。
+
 ## ThreadPoolDeviceFactory
 
 ThreadPoolDeviceFactory 是 DeviceFactory的直接子类。定义在tensorflow/core/common_runtime/threadpool_device_factory.cc，由于太过简单，没有定义头文件。
@@ -327,8 +377,13 @@ options.config.device_count()
       options, name, Bytes(256 << 20), DeviceLocality(),
       ProcessState::singleton()->GetCPUAllocator(port::kNUMANoAffinity));
 ```
+总结一下，就是从sessionoption中读取配置确定配置了n个设备，然后新建n个ThreadPoolDevice对象，关于ThreadPoolDevice 可以看Device一章的内容。
 
-上面的代码就是ThreadPoolDevice的构造函数，我们来一起学习一下ThreadPoolDevice
+GP
 
-### ThreadPoolDevice
+### BaseGPUDeviceFactory
+
+BaseGPUDeviceFactory的代码在tensorflow/core/common_runtime/gpu/gpu_device.h和 tensorflow/core/common_runtime/gpu/gpu_device.cc，同时BaseGPUDevice 的代码也在这个路径中。
+
+
 

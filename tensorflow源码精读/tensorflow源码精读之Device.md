@@ -20,7 +20,7 @@ classDiagram
   ThreadPoolDevice <--GPUCompatibleCPUDevice
 ```
 
-其中localDevice的各种子类由各种factory生成。syclDevice在最新版本的tensorflow中已经换成了plugindevice等设备。不过这些设备都不常用，所以我们把注意力放在localDevice中就好。
+其中localDevice的各种子类由各种factory生成。plugindevice, TpuDeviceState等这些设备都不常用，所以我们把注意力放在localDevice中就好。RemoteDevice和分布式有关，我们在学习分布式的时候再深入分析。
 
 
 我们先来看deviceBase
@@ -43,7 +43,7 @@ CpuWorkerThreads 是一个结构体，定义如下：
     thread::ThreadPool* workers = nullptr;
   };
 ```
-可以看到cpu_worker_threads_其实就是对线程池的简单封装，不过在DeviceBase中，cpu_worker_threads_并没有用到，可能是在代码的重构过程中把这个属性逐渐下放到了子类中,这里先不介绍，后面真的用到的时候再介绍。
+可以看到cpu_worker_threads_其实就是对线程池的简单封装，不过在DeviceBase中，cpu_worker_threads_并没有用到，赋值也是在子类localDevice中进行的，可能是在代码的重构过程中把这个属性逐渐下放到了子类中,这里先不介绍，后面真的用到的时候再介绍。
 
 
 accelerator_device_info_,在很多博客中叫 gpu_device_info_, 是一个用于描述gpu或者其他设备的结构体，结构体的定义为
@@ -80,7 +80,8 @@ graph LR;
   DeviceBase --> AcceleratorDeviceInfo
   AcceleratorDeviceInfo --> CopyCPUTensorToDevice
   AcceleratorDeviceInfo --> CopyDeviceTensorToCPU
-  subgraph 没用
+  DeviceBase --> Env
+  subgraph 被子类localDevice赋值
   DeviceBase --> Eigen::ThreadPoolDevice
   DeviceBase --> CpuWorkerThreads
   DeviceBase --> thread::ThreadPool
@@ -173,7 +174,7 @@ Device::Device(Env* env, const DeviceAttributes& device_attributes)
 }
 ```
 
-构造函数中做了两件事：给parsed_name_赋值，新创建了一个ResourceMgr对象。  parsed_name_扶持调用了前面提到的ParseFullName 函数中，并且用到了deviceBase的函数name()， 该函数源码如下, 只是返回了device_attributes_的name。
+构造函数中给DeviceBase和device_attributes_做了初始化，然后做了两件事：给parsed_name_赋值，新创建了一个ResourceMgr对象。  parsed_name_扶持调用了前面提到的ParseFullName 函数中，并且用到了deviceBase的函数name()， 该函数源码如下, 只是返回了device_attributes_的name。
 
 ```cpp
 const std::string& name() const override { return device_attributes_.name(); }
@@ -562,7 +563,9 @@ LocalDevice::LocalDevice(const SessionOptions& options,
 }
 ```
 
-这里应该注意的是，在一开始实现了Device的初始化。
+这里应该注意的是，在一开始实现了Device的初始化。在函数体中，有一个是否用use_global_threadpool_的条件判断。我们只关注不用use_global_threadpool_的情况，不用use_global_threadpool_的时候，只是简单地定义了一个给localDevice::EigenThreadPoolInfo  owned_tp_info_赋值。然后把owned_tp_info_的CpuWorkerThreads赋值给DeviceBase的cpu_worker_threads_, 把其中的Eigen::ThreadPoolDevice赋值给DeviceBase eigen_cpu_devices_
+
+
 
 
 
@@ -631,24 +634,58 @@ classDiagram
   EigenThreadPoolInfo : std&#58&#58unique_ptr&#60EigenAllocator> eigen_allocator_
 ```
 
+## 4. ThreadPoolDevice
 
+在LocalDevice中基本已经把关键属性都定义完了，在接下来的ThreadPoolDevice等对象 主要就是对localDevice的进一步具象，例如compute等函数的实现。ThreadPoolDevice的构造函数为：
 
+```cpp
+ThreadPoolDevice::ThreadPoolDevice(const SessionOptions& options,
+                                   const string& name, Bytes memory_limit,
+                                   const DeviceLocality& locality,
+                                   Allocator* allocator)
+    : LocalDevice(options, Device::BuildDeviceAttributes(
+                               name, DEVICE_CPU, memory_limit, locality)),
+      allocator_(allocator),
+      scoped_allocator_mgr_(new ScopedAllocatorMgr(name)) {
+  auto s = NodeFileWriter::GetNodeFileWriterIfEnabled(name, env());
+  if (!s.ok()) {
+    LOG(ERROR) << s.status();
+  } else {
+    node_file_writer_ = *s;
+    if (node_file_writer_) {
+      LOG(INFO) << "Writing NodeDefs to file: "
+                << node_file_writer_->filename();
+    }
+  }
 
+#if defined(ENABLE_ONEDNN_OPENMP) && defined(INTEL_MKL)
+  // Early return when MKL is disabled
+  if (!IsMKLEnabled()) return;
+#ifdef _OPENMP
+  const char* user_omp_threads = getenv("OMP_NUM_THREADS");
+  static absl::once_flag num_threads_setting_flag;
+  if (user_omp_threads == nullptr) {
+    // OMP_NUM_THREADS controls MKL's intra-op parallelization
+    // Default to available physical cores
+    const int mkl_intra_op = port::NumSchedulableCPUs();
+    const int ht = port::NumHyperthreadsPerCore();
+    absl::call_once(num_threads_setting_flag, omp_set_num_threads,
+                    (mkl_intra_op + ht - 1) / ht);
+  }
 
+#ifndef DNNL_AARCH64_USE_ACL
+  const char* user_kmp_blocktime = getenv("KMP_BLOCKTIME");
+  static absl::once_flag blocktime_setting_flag;
+  if (user_kmp_blocktime == nullptr) {
+    // Sets the time, in milliseconds, that a thread should wait,
+    // after completing the execution of a parallel region, before sleeping.
+    absl::call_once(blocktime_setting_flag, kmp_set_blocktime, 1);
+  }
+#endif
 
+#endif  // _OPENMP
+#endif  // defined(ENABLE_ONEDNN_OPENMP) && defined(INTEL_MKL)
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+```
+构造函数和LocalDevice的构造函数入参一模一样，在初始化过程中也是先初始化一个LocalDevice。

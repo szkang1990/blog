@@ -912,6 +912,8 @@ class Arena {
 &emsp;其中有一个reinterpret_cast的用法，这是c++中相当自由的格式转换的方法，可以把任意格式转换成任意格式，由于在使用中非常容易出错，所以一般不建议使用。
 
 
+Python侧创建图的代码在 tensorflow/python/framework/ops.py
+
 ## ShapeRefiner
 
 

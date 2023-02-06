@@ -291,7 +291,6 @@ class OpDefBuilder {
   bool allow_attr_type_any_ = false;
 };
  
-}  // namespace tensorflow
 ```
 
 OpDefBuilder几个主要的类成员都是我们最一开始的时候设置op的时候设置的那些属性
