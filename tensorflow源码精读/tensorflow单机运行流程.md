@@ -43,7 +43,39 @@ class Graph(object):
 
 python和c++的代码连接比较简单，c++的代码编译成一系列的.so文件，这些.so文件都放在{tensorflow安装路径}/python中(在不同的tensorflow版本中这个路径可能略有不同，但是一般都在/python或者其子目录下。
 
+在Python代码中会利用pybind11导入.so文件，例如在上面的例子中。首先在tensorflow\tensorflow\python\client\pywrap_tf_session.py中通过如下语句导入了_pywrap_tf_session.so。
+```py
+from tensorflow.python.client._pywrap_tf_session import *
+from tensorflow.python.client._pywrap_tf_session import _TF_SetTarget
+from tensorflow.python.client._pywrap_tf_session import _TF_SetConfig
+from tensorflow.python.client._pywrap_tf_session import _TF_NewSessionOptions
+```
 
+然后在tensorflow/python/framework/c_api_util.py利用如下语句，再次导入了
+
+```py
+from tensorflow.core.framework import api_def_pb2
+from tensorflow.core.framework import op_def_pb2
+from tensorflow.python.client import pywrap_tf_session as c_api
+from tensorflow.python.util import compat
+from tensorflow.python.util import tf_contextlib
+```
+
+
+_pywrap_tf_session.so的定义在tensorflow\python\client\tf_session_wrapper.cc，相关的源码如下：
+
+```cpp
+#include "tensorflow/c/c_api.h"
+...
+PYBIND11_MODULE(_pywrap_tf_session, m) {
+  ...
+    m.def("TF_NewGraph", TF_NewGraph, py::return_value_policy::reference,
+        py::call_guard<py::gil_scoped_release>());
+  ...
+}
+
+```
+上面的代码中，PYBIND11_MODULE(_pywrap_tf_session, m)规定了.so的包名，m.def定义了这个包里有哪些python的函数。早python中只需要导入这个包，然后调用这个函数就可以了。
 
 op_def_library.py 中有op_def_library.apply_op
 
