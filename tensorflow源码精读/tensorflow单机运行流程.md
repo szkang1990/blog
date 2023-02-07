@@ -39,11 +39,19 @@ class Graph(object):
 
 # 2. Python和c++代码的连接
 
-从2020年开始，tensorflow的Python和c++的代码连接是通过pybind实现的，而不是swig了(https://github.com/tensorflow/community/blob/master/rfcs/20190208-pybind11.md#replace-swig-with-pybind11)。网上很多博客是基于比较旧版本的tensorflow，所以说tensorflow用的是swig。swig和pybind本人都没有用过，具体优劣并不熟悉，有兴趣可以看这个项目(https://github.com/UlovHer/PythonCallCpp)，而且这也不是我们学习tensorflow的重点。
+从2020年开始，tensorflow的Python和c++的代码连接是通过pybind实现的，而不是swig了(https://github.com/tensorflow/community/blob/master/rfcs/20190208-pybind11.md#replace-swig-with-pybind11)。网上很多博客说python和c++的代码连接靠的是swig，是基于比较旧版本的tensorflow。swig和pybind本人都没有用过，具体优劣并不熟悉，有兴趣可以看这个项目(https://github.com/UlovHer/PythonCallCpp)，而且这也不是我们学习tensorflow的重点。
 
 python和c++的代码连接比较简单，c++的代码编译成一系列的.so文件，这些.so文件都放在{tensorflow安装路径}/python中(在不同的tensorflow版本中这个路径可能略有不同，但是一般都在/python或者其子目录下。
 
 
+
+op_def_library.py 中有op_def_library.apply_op
+
+apply_op调用_apply_op_helper
+
+_apply_op_helper调用_GetOpDef 获取 opdef， g, producer
+
+然后调用g._create_op_internal
   
 
 # 3. 创建node
