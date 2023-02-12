@@ -307,7 +307,7 @@ Status ShapeRefiner::AddNodeInternal(
 ```
 
 这段代码真的进行形状推断，根据输入计算输出的形状。这个过程中，非常频繁的用到了InferenceContext，所以先学习一下InferenceContext和 ExtendedInferenceContext的代码。
-#### ExtendedInferenceContext
+## ExtendedInferenceContext
 ExtendedInferenceContext的代码在路径tensorflow/core/common_runtime/shape_refiner.h中，代码量很小
 
 ```cpp
@@ -355,10 +355,11 @@ class ExtendedInferenceContext {
 构造函数也很简单，接收两个入参：InferenceContext 和node， 其中InferenceContext 和  nodeName 直接赋值给inference_context_ 和op， 然后把Node的输入输出类型赋值给input_types_， output_types_。 
 几个函数也是比较简单的，不赘述。总的来说ExtendedInferenceContext就是对InferenceContext进行了一次封装。
 
-#### InferenceContext
+# InferenceContext
 
 InferenceContext 是形状推断中的核心类。代码路径是tensorflow/core/framework/shape_inference.h
 
+## 基本属性
 
 ## 构造函数
 我们先来看他的构造函数
@@ -430,7 +431,12 @@ InferenceContext::InferenceContext(
   PostInputInit(std::move(input_handle_shapes_and_types));
 }
 ```
-InferenceContext 有两个构造函数，两个函数入参的区别是第4个入参是PartialTensorShape 还是 ShapeHandle
+InferenceContext 有两个构造函数，两个函数入参的区别是第4个入参是PartialTensorShape 还是 ShapeHandle。
+前者表示我们只知道输入的部分形状，后者表示我们知道输入的所有形状。如果入参是PartialTensorShape，则先生成ShapeHandle。
+然后调用PreInputInit
+
+##### PreInputInit函数
+
 
 
 

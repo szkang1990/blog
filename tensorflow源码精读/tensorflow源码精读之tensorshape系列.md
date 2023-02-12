@@ -130,6 +130,82 @@ Dimension : +int64
 ```
 
 
+# ShapeManager
+ShapeManager的源码位置在tensorflow/core/framework/shape_inference.h, 源码如下
+
+```cpp
+  class ShapeManager {
+   public:
+    ShapeManager();
+    ~ShapeManager();
+
+    // Returns a new shape with the given dims. The returned value is owned by
+    // this class.
+    ShapeHandle MakeShape(const std::vector<DimensionHandle>& dims);
+
+    // Returns a new unknown shape.
+    ShapeHandle UnknownShape();
+
+    // Returns a new dimension of the given size.  The returned value
+    // is owned by this class.
+    inline DimensionHandle MakeDim(DimensionOrConstant d) {
+      if (d.dim.IsSet()) {
+        return d.dim;
+      } else {
+        all_dims_.push_back(new Dimension(d.val));
+        return all_dims_.back();
+      }
+    }
+
+   private:
+    std::vector<Shape*> all_shapes_;    // values are owned.
+    std::vector<Dimension*> all_dims_;  // values are owned.
+  };
+```
+本质上就是对Shape和Dimension的封装，用于形状推断，例如某个节点有三个输入，那么std::vector<Shape*> all_shapes_会存入这三个输入的Shape
+
+# DimensionOrConstant
+
+DimensionOrConstant代码地址在tensorflow/core/framework/shape_inference.h，代码如下，非常简单，就是对DimensionHandle一层封装。
+
+```cpp
+struct DimensionOrConstant {
+ public:
+  // Intentionally not explicit.
+  DimensionOrConstant(DimensionHandle dim);
+
+  // val must be non-negative or InferenceContext::kUnknownDim.
+  DimensionOrConstant(int64_t val);
+
+  // dim takes precedence. If dim != nullptr, val is ignored.
+  DimensionHandle dim;
+  int64_t val;
+
+ private:
+  DimensionOrConstant();
+};
+```
+
+# ShapeAndType
+
+ShapeAndType的源码在tensorflow/core/framework/shape_inference.h 具体代码如下，是对shapehandle和Datatype的简单的封装。
+```cpp
+struct ShapeAndType {
+  ShapeAndType() {}
+  ShapeAndType(ShapeHandle s, DataType t) : shape(s), dtype(t) {}
+  // TODO(mdan): Remove dtype from constructor, and use type_ instead.
+  // dtype is kept here for backward compatibiity. Its information should
+  // be redundant to that in type;
+  ShapeAndType(ShapeHandle s, DataType t, FullTypeDef type_)
+      : shape(s), dtype(t), type(type_) {}
+
+  ShapeHandle shape;
+  DataType dtype = DT_INVALID;
+  FullTypeDef type;
+};
+```
+
+
 # TensorShape
 
 TensorShape的定义在tensorflow\core\framework\tensor_shape.h，源码如下
