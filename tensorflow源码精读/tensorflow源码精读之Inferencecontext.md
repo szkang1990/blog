@@ -482,8 +482,9 @@ Status InferenceContext::Merge(DimensionHandle d0, DimensionHandle d1,
 ```
 
 
-### UnknownDim
-这个函数接受一个
+### UnknownDim && MakeDim
+UnknownDim这个函数接受一个整数-1，调用了MakeDim函数，MakeDim应该接受一个DimensionOrConstant类型的入参，所以这里是用到了c++中结构体的隐式声明。
+MakeDim调用了ShapeManager的函数MakeDim，这个函数在tensorshape一节中有详解介绍。这段调用相当于返回一个值为-1的dimension。
 
 ```cpp
   inline DimensionHandle UnknownDim() { return MakeDim(kUnknownDim); }
@@ -495,10 +496,41 @@ Status InferenceContext::Merge(DimensionHandle d0, DimensionHandle d1,
 
 ```
 
+
+### MakeShape
+
+Makeshape函数有两个实现方法，入参都是DimensionHandle相关，然后调用shape_manager_.MakeShape，shape_manager_.MakeShape这个函数我们有过详细的介绍。
+
+```cpp
+ShapeHandle InferenceContext::MakeShape(
+    const std::vector<DimensionHandle>& dims) {
+  return shape_manager_.MakeShape(dims);
+}
+
+ShapeHandle InferenceContext::MakeShape(
+    std::initializer_list<DimensionOrConstant> dims) {
+  std::vector<DimensionHandle> dims_actual;
+  dims_actual.reserve(dims.size());
+  for (const DimensionOrConstant& d : dims) {
+    dims_actual.push_back(MakeDim(d));
+  }
+
+  return shape_manager_.MakeShape(dims_actual);
+}
+
+ShapeHandle InferenceContext::ShapeManager::MakeShape(
+    const std::vector<DimensionHandle>& dims) {
+  all_shapes_.push_back(new Shape(dims));
+  return all_shapes_.back();
+}
+
+```
+
+
 ### withRank
 
 对于给定的shapehandle 和rank
-如果shpehandle的rank_和入参rank相等，那么直接返回入参ShapeHandle。如果ShapeHandle 没有设置rank_
+如果shpehandle的rank_和入参rank相等，那么直接返回入参ShapeHandle。如果ShapeHandle 没有设置rank_，则创建一个入参rank大小的vector，内容是DimensionHandle。vector中塞入值是-1的dimension，即[-1,-1,-1....]。然后根据这个std::vector<DimensionHandle> 生成一个ShapeHandle，并且和ShapeHandle merge到一起。
 ```cpp
 Status InferenceContext::WithRank(ShapeHandle shape, int64_t rank,
                                   ShapeHandle* out) {
@@ -525,3 +557,5 @@ Status InferenceContext::WithRank(ShapeHandle shape, int64_t rank,
                                  existing);
 }
 ```
+
+

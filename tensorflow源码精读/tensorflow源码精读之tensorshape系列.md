@@ -162,7 +162,31 @@ ShapeManager的源码位置在tensorflow/core/framework/shape_inference.h, 源�
     std::vector<Dimension*> all_dims_;  // values are owned.
   };
 ```
+
 本质上就是对Shape和Dimension的封装，用于形状推断，例如某个节点有三个输入，那么std::vector<Shape*> all_shapes_会存入这三个输入的Shape
+
+shapeManger 有三个个成员函数MakeDim，MakeShape，UnknownShape。
+MakeDim这个函数的函数体就在上面，会判断入参DimensionOrConstant是否有不为空的属性dim，dim的数据类型是DimensionHandle。如果dim不为空则直接返回dim，如果dim为空，则创建一个d.val初始化的dimension， 并且返回。
+
+MakeShape源码如下，作用是根据std::vector<DimensionHandle> 生成一个Shape，返回该shape,并且追加到all_shapes_。
+```cpp
+ShapeHandle InferenceContext::ShapeManager::MakeShape(
+    const std::vector<DimensionHandle>& dims) {
+  all_shapes_.push_back(new Shape(dims));
+  return all_shapes_.back();
+}
+```
+UnknownShape代码如下，作用类似，生成一个空的Shape返回并追加到all_shapes_。
+
+```cpp
+ShapeHandle InferenceContext::ShapeManager::UnknownShape() {
+  all_shapes_.push_back(new Shape());
+  return all_shapes_.back();
+}
+```
+
+
+
 
 # DimensionOrConstant
 
