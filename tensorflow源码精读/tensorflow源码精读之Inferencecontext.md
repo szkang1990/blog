@@ -490,7 +490,7 @@ Dim接受两个入参，Shapehandle和int。作用是获取入参Shapehandle的�
 ### merge
 
 merge函数有两个实现，一个是Dimension维度的merge，一个是shaphandle维度的merge。
-Dimension维度的merge是：对于给定的两个DimensionHandle的输入d0和d1，如果d0和d1的维度相同，那么直接返回d0，d0d1其中一个维度不确定，那么返回确定的那个，把d0d1写入merged_dims_， merged_dims_是一个存储DimensionHandle 对的vector。
+Dimension维度的merge是：对于给定的两个DimensionHandle的输入d0和d1，如果d0和d1的维度相同，那么直接返回d0，d0d1其中一个维度不确定，那么返回确定的那个，把d0d1写入merged_dims_， merged_dims_是一个存储DimensionHandle 对的vector。其实说白了就是对比两个维度是否相等，只不过这种对比是一个比较宽松的对比，如果其中一个入参维度未知也可以认为相等。
 ```cpp
 Status InferenceContext::Merge(DimensionHandle d0, DimensionHandle d1,
                                DimensionHandle* out) {
@@ -515,7 +515,10 @@ Status InferenceContext::Merge(DimensionHandle d0, DimensionHandle d1,
   }
 }
 ```
-shapehandle维度的merge是
+shapehandle维度的merge包括三部分
+1.shapehandle的merge，如果s0 s1 是同一个 shapeHandle， 那么直接任意返回一个。如果s0 s1任意一个rank_未知，那么返回已知的那个，如果均未知，那么任意返回一个。如果有未知rank_, 则把s0 s1，放进merged_shapes_以供将来具体判断。如果s0 s1 rank_  都已知，且rank_不相等，则无法merge，抛出异常。如果如果s0 s1 rank_  都已知且rank_相等，那么进入第二步的判断
+2.遍历s0 和 s1中的dimension，在每个维度上对比s0，s1。如果某个维度s0和s1有不一致的地方，name 抛出异常，如果s0或s1所有维度均为已知，那么返回所有维度已知的shaphandle，若s0 s1 都有某个维度是未知的，则把s0, s1写入merged_shapes_，进入第三步
+3.遍历s0， 依次在dimension维度上merge。结果写入新建的dimension vector std::vector<DimensionHandle> dims。然后根据dims新建一个shapehandles, 写入out, 然后 merged_shapes_.emplace_back(s0, *out);
 ```cpp
 Status InferenceContext::Merge(ShapeHandle s0, ShapeHandle s1,
                                ShapeHandle* out) {
@@ -585,10 +588,13 @@ Status InferenceContext::Merge(ShapeHandle s0, ShapeHandle s1,
   }
   return s;
 }
+
+
+
 ```
 
 
-### MakeShape
+### MakeShape && ReturnCreatedShape
 
 Makeshape函数有两个实现方法，入参都是DimensionHandle相关，然后调用shape_manager_.MakeShape，shape_manager_.MakeShape这个函数我们有过详细的介绍。
 
@@ -615,6 +621,11 @@ ShapeHandle InferenceContext::ShapeManager::MakeShape(
   return all_shapes_.back();
 }
 
+  Status ReturnCreatedShape(const std::vector<DimensionHandle>& dims,
+                            ShapeHandle* out) {
+    *out = MakeShape(dims);
+    return Status::OK();
+  }
 ```
 
 
