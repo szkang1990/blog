@@ -306,54 +306,27 @@ Status ShapeRefiner::AddNodeInternal(
 }
 ```
 
-这段代码真的进行形状推断，根据输入计算输出的形状。这个过程中，非常频繁的用到了InferenceContext，所以先学习一下InferenceContext和 ExtendedInferenceContext的代码。
-## ExtendedInferenceContext
-ExtendedInferenceContext的代码在路径tensorflow/core/common_runtime/shape_refiner.h中，代码量很小
+这段代码真的进行形状推断，根据输入计算输出的形状。这个过程中，非常频繁的用到了InferenceContext和 ExtendedInferenceContext的代码。 他们的代码咋inferecneContext中有详细的介绍。这里能看出来的，shaperefiner和inferenceContext分工是很明确的，shaperefiner负责整体的形状推断的流程，对每个node，shaperefiner创建一个inferenceContext，同时先从node上获取edge表示的node的每个输入, 然后根据每个edge获取相应的上游node，获取这些上游node的输出的形状，也就是目标node的输入的形状。
 
-```cpp
-class ExtendedInferenceContext {
- public:
-  ExtendedInferenceContext(
-      std::unique_ptr<shape_inference::InferenceContext> ic, const Node* node)
-      : inference_context_(std::move(ic)), op_(node->name()) {
-    input_types_.reserve(node->num_inputs());
-    for (int i = 0; i < node->num_inputs(); i++) {
-      input_types_.push_back(node->input_type(i));
-    }
-    output_types_.reserve(node->num_outputs());
-    for (int i = 0; i < node->num_outputs(); i++) {
-      output_types_.push_back(node->output_type(i));
-    }
-  }
+具体流程如下：
 
-  DataType input_type(int64_t idx) const { return input_types_[idx]; }
-  DataType output_type(int64_t idx) const { return output_types_[idx]; }
-
-  shape_inference::InferenceContext* get_context() {
-    return inference_context_.get();
-  }
-
-  std::string op() const { return op_; }
-
- private:
-  std::unique_ptr<shape_inference::InferenceContext> inference_context_;
-  std::string op_;
-  std::vector<DataType> input_types_;
-  std::vector<DataType> output_types_;
-
-  TF_DISALLOW_COPY_AND_ASSIGN(ExtendedInferenceContext);
-};
+```mermaid
+graph
+NodeA --> NodeB
 ```
-核心的属性只有4个，其中inference_context_后面会做详细的介绍。其他的属性都一目了然。
-```cpp
-  std::unique_ptr<shape_inference::InferenceContext> inference_context_;
-  std::string op_;
-  std::vector<DataType> input_types_;
-  std::vector<DataType> output_types_;
-```
+以上图为例，我们要对NodeB做形状推断
+1. 为目标节点创建一个inferenceContext对象，其中仅仅初始化了graph_version, node_def, op_def, node的输入个数。
+2. 通过node->in_edges()获取目标节点的所有输入边，并遍历之
+3. 对于遍历的某个边，我们可以通过e->dst_input()获取这个边是目标节点的第几个输入边
+4. 对于这个边的上游nodeA，如果node_to_context_中没有保存这个上游nodeA，则通过SetInput为这个位置的输入安排一个位置形状的输入。node_to_context_，是一个map，key是node，value是这个node的inferencecontext。表示node和inference的对应关系。如果node_to_context_中保存了这个nodeA，那么我么你就可以从node_to_context_取出这个NodeA对应的inferencecontext。我们可以通过src_output函数从edgs中知道这个edge是NodeA的第几个输出，然后用output函数获取这个输出的形状。这个形状就是NodeB的输入的形状。同样的手段，我们可以设置nodeB的input_handle_shapes_and_types属性
+5. 经过上面的过程，我们就把一个node的输入全部获取完了并且写入到了inferenceContext中。然后从op注册信息中获取op注册时写的形状推理函数
+6. 调用RunShapeFn，进行形状推断。RunShapeFn就是调用op注册信息中的推断函数，具体可以看代码，这里就不多赘述了。
 
-构造函数也很简单，接收两个入参：InferenceContext 和node， 其中InferenceContext 和  nodeName 直接赋值给inference_context_ 和op， 然后把Node的输入输出类型赋值给input_types_， output_types_。 
-几个函数也是比较简单的，不赘述。总的来说ExtendedInferenceContext就是对InferenceContext进行了一次封装。
+
+   
+
+
+
 
 
 

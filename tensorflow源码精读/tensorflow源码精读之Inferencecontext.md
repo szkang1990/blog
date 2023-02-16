@@ -352,10 +352,35 @@ void InferenceContext::PostInputInit(
 ```
 
 
-### set_output函数
-前面介绍了output_name_map_的定义，所以这个理set_output就很好解释了。我们希望设置名为output的输出的形状，所以第一个入参就是我们希望设置的output的名称，第二个是我们要设置的形状。当然，output可能布置一个tensor所以要设置的output的长度和我们给定的形状的长度必须要一致。
+### output系列函数
 
+获取output
 
+```cpp
+  ShapeHandle output(int64_t idx) const { return outputs_.at(idx); }
+
+  
+  ShapeHandle output(int idx) const { return outputs_.at(idx); }
+
+  Status InferenceContext::output(StringPiece output_name,
+                                std::vector<ShapeHandle>* output) const {
+  const auto result = output_name_map_.find(output_name);
+  if (result == output_name_map_.end()) {
+    return errors::InvalidArgument("Unknown output name: ", output_name);
+  } else {
+    output->clear();
+    for (int i = result->second.first; i < result->second.second; ++i) {
+      output->push_back(outputs_[i]);
+    }
+  }
+  return Status::OK();
+}
+  int num_outputs() const { return outputs_.size(); }
+```
+可以通过输出的序号获取输出，或者通过输出的名称，获取output_name_map_中一列系列的输出
+num_outputs 函数可以获得output的个数
+
+设置output
 ```cpp
 Status InferenceContext::set_output(StringPiece output_name,
                                     const std::vector<ShapeHandle>& shapes) {
@@ -377,16 +402,15 @@ Status InferenceContext::set_output(StringPiece output_name,
   return Status::OK();
 }
 ```
-在一些早期的版本tensorflow中，可以通过output的位置设置形状，代码如下：
+前面介绍了output_name_map_的定义，所以这个理set_output就很好解释了。我们希望设置名为output的输出的形状，所以第一个入参就是我们希望设置的output的名称，第二个是我们要设置的形状。当然，output可能布置一个tensor所以要设置的output的长度和我们给定的形状的长度必须要一致。
+当然也可以通过序号设置输出
 ```cpp
-Status InferenceContext::set_output(int idx,
-                                    const <ShapeHandle>& shape)
+  ShapeHandle output(int64_t idx) const { return outputs_.at(idx); }
 ```
 即给第idx个输出设置形状，非常简单。
 
-
-### input
-
+### input系列
+获取input有两个途径，通过输入的名称或者输入的序号
 input函数的作用是名为input_name的所有输入tensor的形状，同样因为input_name可能有多个输入，所以输出是一个vector，赋值给入参output。
 
 ```cpp
@@ -405,31 +429,20 @@ Status InferenceContext::input(StringPiece input_name,
 }
 ```
 
-同样的，在早期版本的tensorflow中，有通过位置获取形状的函数input，代码如下，
+我们也可以通过输入的序号获取输入，这个函数太简单，所以写在了shape_inferecne.h中。
 
 ```cpp
-Status InferenceContext::input(int idx) 
+ShapeHandle input(int64_t idx) const { return inputs_[idx]; }
 ```
 表示获取第idx个输入。
 
-
-### output 
-output函数和input非常类似，不做赘述
+设置input可以通过序号来操作
 ```cpp
-Status InferenceContext::output(StringPiece output_name,
-                                std::vector<ShapeHandle>* output) const {
-  const auto result = output_name_map_.find(output_name);
-  if (result == output_name_map_.end()) {
-    return errors::InvalidArgument("Unknown output name: ", output_name);
-  } else {
-    output->clear();
-    for (int i = result->second.first; i < result->second.second; ++i) {
-      output->push_back(outputs_[i]);
-    }
-  }
-  return Status::OK();
-}
+  void SetInput(int idx, ShapeHandle shape) { inputs_[idx] = shape; }
 ```
+
+
+
 
 
 
@@ -632,7 +645,8 @@ ShapeHandle InferenceContext::ShapeManager::MakeShape(
 ### withRank
 
 对于给定的shapehandle 和rank
-如果shpehandle的rank_和入参rank相等，那么直接返回入参ShapeHandle。如果ShapeHandle 没有设置rank_，则创建一个入参rank大小的vector，内容是DimensionHandle。vector中塞入值是-1的dimension，即[-1,-1,-1....]。然后根据这个std::vector<DimensionHandle> 生成一个ShapeHandle，并且和ShapeHandle merge到一起。
+如果shpehandle的rank_和入参rank相等，那么直接返回入参ShapeHandle。如果ShapeHandle 没有设置rank_，则创建一个入参rank大小的vector，内容是DimensionHandle。vector中塞入值是-1的dimension，即[-1,-1,-1....]。然后根据这个std::vector<DimensionHandle> 生成一个ShapeHandle，并且和ShapeHandle merge到一起。由于入参的ShapeHandle的rank_未知，所以可以认为直接把新生成的ShapeHandle赋值给了out。
+综上，withRank的作用就是，如果入参ShapeHandle的维度已知且和入参rank一样，那么直接返回shapehandle，如果入参ShapeHandle维度未知，那么返回一个rank_ = rank的新shapehandle， 如果入参ShapeHandle的维度已知且和入参rank不一样，那么但会一个null。
 ```cpp
 Status InferenceContext::WithRank(ShapeHandle shape, int64_t rank,
                                   ShapeHandle* out) {
