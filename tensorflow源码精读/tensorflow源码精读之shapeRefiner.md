@@ -323,6 +323,8 @@ NodeA --> NodeB
 6. 调用RunShapeFn，进行形状推断。RunShapeFn就是调用op注册信息中的推断函数，具体可以看代码，这里就不多赘述了。
 
 
+
+
    
 
 
