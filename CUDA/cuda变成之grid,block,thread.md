@@ -188,11 +188,6 @@ int threadId =  threadIdx.z * (blockDim.x * blockDim.y)
 
 
 
-## 并行运算
-在深度学习中，矩阵
-
-
-
 
 
 
